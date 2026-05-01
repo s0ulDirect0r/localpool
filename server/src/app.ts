@@ -11,7 +11,9 @@ import {
 import { openDb, type DB } from './db.js';
 import { estimateFare, scoreTripForRequest } from './match.js';
 import type {
+  ProfileSummary,
   PublicUser,
+  RatingRow,
   RequestRow,
   RequestStatus,
   TripRow,
@@ -104,8 +106,8 @@ export function createApp(opts: AppOptions = {}) {
     const userId = id('usr');
     const hash = await hashPassword(password);
     db.prepare(
-      `INSERT INTO users (id, name, email, phone, password_hash, vehicle, seats, created_at)
-       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
+      `INSERT INTO users (id, name, email, phone, password_hash, vehicle, seats, bio, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?)`,
     ).run(userId, name.trim(), email.toLowerCase().trim(), phone.trim(), hash, Date.now());
     const user = loadUser(db, userId)!;
     const token = signToken(secret, userId);
@@ -136,7 +138,7 @@ export function createApp(opts: AppOptions = {}) {
     const body = await c.req.json().catch(() => null);
     if (!body) return c.json({ error: 'invalid_body' }, 400);
     const userId = c.get('userId');
-    const { vehicle, seats, name, phone } = body as Record<string, unknown>;
+    const { vehicle, seats, name, phone, bio } = body as Record<string, unknown>;
     const updates: string[] = [];
     const values: (string | number | null)[] = [];
     if (typeof vehicle === 'string') {
@@ -154,6 +156,13 @@ export function createApp(opts: AppOptions = {}) {
     if (typeof phone === 'string' && phone.trim()) {
       updates.push('phone = ?');
       values.push(phone.trim());
+    }
+    if (typeof bio === 'string') {
+      updates.push('bio = ?');
+      values.push(bio.trim() || null);
+    } else if (bio === null) {
+      updates.push('bio = ?');
+      values.push(null);
     }
     if (updates.length) {
       values.push(userId);
@@ -441,6 +450,7 @@ export function createApp(opts: AppOptions = {}) {
       ...myRequests.map((r) => ({
         kind: 'rider' as const,
         id: r.id,
+        trip_id: r.trip_id,
         pickup_label: r.pickup_label,
         dropoff_label: r.dropoff_label,
         seats: r.seats,
@@ -455,6 +465,7 @@ export function createApp(opts: AppOptions = {}) {
         return {
           kind: 'driver' as const,
           id: t.id,
+          trip_id: t.id,
           pickup_label: t.pickup_label,
           dropoff_label: t.dropoff_label,
           seats: t.seats_total,
@@ -466,6 +477,178 @@ export function createApp(opts: AppOptions = {}) {
       }),
     ].sort((a, b) => b.created_at - a.created_at);
     return c.json({ history: items });
+  });
+
+  // ---------- Public profiles + ratings ----------
+  function profileSummary(userId: string): ProfileSummary | null {
+    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow | undefined;
+    if (!u) return null;
+    const agg = db
+      .prepare('SELECT AVG(stars) AS avg, COUNT(*) AS count FROM ratings WHERE ratee_id = ?')
+      .get(userId) as { avg: number | null; count: number };
+    const ridesAsRider = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS c FROM requests WHERE rider_id = ? AND status = 'completed'`,
+        )
+        .get(userId) as { c: number }
+    ).c;
+    const ridesAsDriver = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS c FROM trips WHERE driver_id = ? AND status = 'completed'`,
+        )
+        .get(userId) as { c: number }
+    ).c;
+    return {
+      ...publicUser(u),
+      rating_avg: agg.avg !== null ? +agg.avg.toFixed(2) : null,
+      rating_count: agg.count,
+      rides_as_rider: ridesAsRider,
+      rides_as_driver: ridesAsDriver,
+    };
+  }
+
+  app.get('/users/:id', auth, (c) => {
+    const target = c.req.param('id');
+    const profile = profileSummary(target);
+    if (!profile) return c.json({ error: 'user_not_found' }, 404);
+    return c.json({ profile });
+  });
+
+  function tripParticipants(tripId: string): {
+    trip: TripRow;
+    driver: PublicUser;
+    riders: { user: PublicUser; request: RequestRow }[];
+  } | null {
+    const trip = getTrip(db, tripId);
+    if (!trip) return null;
+    const driver = loadUser(db, trip.driver_id);
+    if (!driver) return null;
+    const riders = getRequestsForTrip(db, tripId)
+      .filter((r) => r.status !== 'cancelled')
+      .map((r) => {
+        const user = loadUser(db, r.rider_id);
+        return user ? { user, request: r } : null;
+      })
+      .filter((x): x is { user: PublicUser; request: RequestRow } => x !== null);
+    return { trip, driver, riders };
+  }
+
+  function isParticipant(tripId: string, userId: string): boolean {
+    const trip = getTrip(db, tripId);
+    if (!trip) return false;
+    if (trip.driver_id === userId) return true;
+    const r = db
+      .prepare(
+        `SELECT id FROM requests WHERE trip_id = ? AND rider_id = ? AND status != 'cancelled'`,
+      )
+      .get(tripId, userId);
+    return !!r;
+  }
+
+  app.get('/rides/:tripId/participants', auth, (c) => {
+    const userId = c.get('userId');
+    const tripId = c.req.param('tripId');
+    if (!isParticipant(tripId, userId)) {
+      return c.json({ error: 'not_a_participant' }, 403);
+    }
+    const data = tripParticipants(tripId);
+    if (!data) return c.json({ error: 'trip_not_found' }, 404);
+    const driverProfile = profileSummary(data.driver.id)!;
+    const riders = data.riders.map((r) => ({
+      profile: profileSummary(r.user.id)!,
+      request: r.request,
+    }));
+    return c.json({ trip: data.trip, driver: driverProfile, riders });
+  });
+
+  function completedParticipantIds(tripId: string): {
+    driverId: string | null;
+    riderIds: string[];
+  } {
+    const trip = getTrip(db, tripId);
+    if (!trip || trip.status !== 'completed') return { driverId: null, riderIds: [] };
+    const riderIds = (
+      db
+        .prepare(
+          `SELECT rider_id FROM requests WHERE trip_id = ? AND status = 'completed'`,
+        )
+        .all(tripId) as { rider_id: string }[]
+    ).map((r) => r.rider_id);
+    return { driverId: trip.driver_id, riderIds };
+  }
+
+  app.post('/rides/:tripId/ratings', auth, async (c) => {
+    const userId = c.get('userId');
+    const tripId = c.req.param('tripId');
+    const body = await c.req.json().catch(() => null);
+    if (!body) return c.json({ error: 'invalid_body' }, 400);
+    const { ratee_id, stars, comment } = body as {
+      ratee_id?: string;
+      stars?: number;
+      comment?: string;
+    };
+    if (!ratee_id || typeof stars !== 'number') {
+      return c.json({ error: 'missing_fields' }, 400);
+    }
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      return c.json({ error: 'invalid_stars' }, 400);
+    }
+    if (ratee_id === userId) return c.json({ error: 'cannot_rate_self' }, 400);
+
+    const { driverId, riderIds } = completedParticipantIds(tripId);
+    if (!driverId) return c.json({ error: 'trip_not_completed' }, 409);
+    const allCompleted = new Set([driverId, ...riderIds]);
+    if (!allCompleted.has(userId)) {
+      return c.json({ error: 'not_a_completed_participant' }, 403);
+    }
+    if (!allCompleted.has(ratee_id)) {
+      return c.json({ error: 'ratee_not_a_completed_participant' }, 400);
+    }
+    const dup = db
+      .prepare(
+        `SELECT id FROM ratings WHERE trip_id = ? AND rater_id = ? AND ratee_id = ?`,
+      )
+      .get(tripId, userId, ratee_id);
+    if (dup) return c.json({ error: 'already_rated' }, 409);
+
+    const ratingId = id('rat');
+    db.prepare(
+      `INSERT INTO ratings (id, trip_id, rater_id, ratee_id, stars, comment, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      ratingId,
+      tripId,
+      userId,
+      ratee_id,
+      stars,
+      typeof comment === 'string' ? comment.trim() || null : null,
+      Date.now(),
+    );
+    const rating = db
+      .prepare('SELECT * FROM ratings WHERE id = ?')
+      .get(ratingId) as RatingRow;
+    return c.json({ rating }, 201);
+  });
+
+  app.get('/rides/:tripId/ratings', auth, (c) => {
+    const userId = c.get('userId');
+    const tripId = c.req.param('tripId');
+    if (!isParticipant(tripId, userId)) {
+      return c.json({ error: 'not_a_participant' }, 403);
+    }
+    const submitted = db
+      .prepare(
+        `SELECT * FROM ratings WHERE trip_id = ? AND rater_id = ? ORDER BY created_at ASC`,
+      )
+      .all(tripId, userId) as RatingRow[];
+    const received = db
+      .prepare(
+        `SELECT * FROM ratings WHERE trip_id = ? AND ratee_id = ? ORDER BY created_at ASC`,
+      )
+      .all(tripId, userId) as RatingRow[];
+    return c.json({ submitted, received });
   });
 
   return { app, db };

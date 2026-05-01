@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Card, H1, Muted, Pill, Row, colors } from '../components/ui';
+import { Button, Card, H1, Muted, Pill, Row, colors } from '../components/ui';
 import { useApp } from '../state/AppContext';
 
 export function HistoryScreen() {
@@ -48,6 +48,21 @@ export function HistoryScreen() {
                 ? 'As rider'
                 : `As driver · ${r.passenger_count ?? 0} passenger${r.passenger_count === 1 ? '' : 's'}`}
             </Muted>
+            {r.status === 'completed' && r.trip_id ? (
+              <>
+                <View style={{ height: 10 }} />
+                <Button
+                  title="Rate participants"
+                  variant="secondary"
+                  onPress={() =>
+                    navigate('rate_participants', {
+                      trip_id: r.trip_id!,
+                      back_to: 'history',
+                    })
+                  }
+                />
+              </>
+            ) : null}
           </Card>
         ))
       )}

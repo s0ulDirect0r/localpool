@@ -6,6 +6,7 @@ export type UserRow = {
   password_hash: string;
   vehicle: string | null;
   seats: number | null;
+  bio: string | null;
   created_at: number;
 };
 
@@ -16,6 +17,24 @@ export type PublicUser = {
   phone: string;
   vehicle: string | null;
   seats: number | null;
+  bio: string | null;
+};
+
+export type ProfileSummary = PublicUser & {
+  rating_avg: number | null;
+  rating_count: number;
+  rides_as_rider: number;
+  rides_as_driver: number;
+};
+
+export type RatingRow = {
+  id: string;
+  trip_id: string;
+  rater_id: string;
+  ratee_id: string;
+  stars: number;
+  comment: string | null;
+  created_at: number;
 };
 
 export type TripStatus = 'active' | 'in_progress' | 'completed' | 'cancelled';

@@ -13,6 +13,7 @@ import type {
   Location,
   Mode,
   Screen,
+  ScreenParams,
   ServerActiveDriver,
   ServerActiveRider,
   ServerHistoryItem,
@@ -29,7 +30,9 @@ type AppState = {
   token: string | null;
   mode: Mode;
   screen: Screen;
+  screenParams: ScreenParams;
   active: ActivePayload;
+  lastCompletedTripId: string | null;
   history: ServerHistoryItem[];
   loaded: boolean;
   error: string | null;
@@ -39,9 +42,10 @@ type AppContextValue = AppState & {
   signUp: (name: string, email: string, phone: string, password: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  updateProfile: (patch: Partial<Pick<ServerUser, 'vehicle' | 'seats' | 'name' | 'phone'>>) => Promise<void>;
+  updateProfile: (patch: Partial<Pick<ServerUser, 'vehicle' | 'seats' | 'name' | 'phone' | 'bio'>>) => Promise<void>;
   setMode: (m: Mode) => void;
-  navigate: (s: Screen) => void;
+  navigate: (s: Screen, params?: ScreenParams) => void;
+  clearLastCompletedTrip: () => void;
   riderRequest: (pickup: Location, dropoff: Location, seats: number) => Promise<void>;
   riderJoin: (tripId: string) => Promise<void>;
   riderCancel: () => Promise<void>;
@@ -78,7 +82,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [mode, setModeState] = useState<Mode>('rider');
   const [screen, setScreen] = useState<Screen>('welcome');
+  const [screenParams, setScreenParams] = useState<ScreenParams>({});
   const [active, setActive] = useState<ActivePayload>(null);
+  const [lastCompletedTripId, setLastCompletedTripId] = useState<string | null>(null);
   const [history, setHistory] = useState<ServerHistoryItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +98,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       if (m === 'rider') {
         const res = await api.riderActive(t);
-        setActive(res.active ? { kind: 'rider', data: res.active } : null);
+        setActive((prev) => {
+          const next = res.active ? { kind: 'rider' as const, data: res.active } : null;
+          // Detect rider-side completion: had an in_progress trip → now nothing
+          if (
+            !next &&
+            prev?.kind === 'rider' &&
+            prev.data.request.status === 'in_progress' &&
+            prev.data.trip
+          ) {
+            setLastCompletedTripId(prev.data.trip.id);
+            setScreen('rate_participants');
+            setScreenParams({ trip_id: prev.data.trip.id, back_to: 'home' });
+          }
+          return next;
+        });
       } else {
         const res = await api.driverActive(t);
         setActive(res.active ? { kind: 'driver', data: res.active } : null);
@@ -212,7 +232,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [persistAuth]);
 
   const updateProfile = useCallback(
-    async (patch: Partial<Pick<ServerUser, 'vehicle' | 'seats' | 'name' | 'phone'>>) => {
+    async (patch: Partial<Pick<ServerUser, 'vehicle' | 'seats' | 'name' | 'phone' | 'bio'>>) => {
       if (!token) return;
       try {
         const res = await api.updateMe(token, patch);
@@ -235,7 +255,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [token, fetchActive],
   );
 
-  const navigate = useCallback((s: Screen) => setScreen(s), []);
+  const navigate = useCallback((s: Screen, params?: ScreenParams) => {
+    setScreen(s);
+    setScreenParams(params ?? {});
+  }, []);
+  const clearLastCompletedTrip = useCallback(() => setLastCompletedTripId(null), []);
 
   const wrap = useCallback(
     async <T,>(fn: (t: string) => Promise<T>): Promise<T> => {
@@ -296,11 +320,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [wrap]);
 
   const driverComplete = useCallback(async () => {
+    const tripId = active?.kind === 'driver' ? active.data.trip.id : null;
     await wrap((t) => api.driverComplete(t));
     setActive(null);
-    setScreen('home');
+    if (tripId) {
+      setLastCompletedTripId(tripId);
+      setScreen('rate_participants');
+      setScreenParams({ trip_id: tripId, back_to: 'home' });
+    } else {
+      setScreen('home');
+    }
     await refreshHistory();
-  }, [wrap, refreshHistory]);
+  }, [wrap, refreshHistory, active]);
 
   const driverCancel = useCallback(async () => {
     await wrap((t) => api.driverCancel(t));
@@ -317,7 +348,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       token,
       mode,
       screen,
+      screenParams,
       active,
+      lastCompletedTripId,
       history,
       loaded,
       error,
@@ -327,6 +360,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateProfile,
       setMode,
       navigate,
+      clearLastCompletedTrip,
       riderRequest,
       riderJoin,
       riderCancel,
@@ -344,7 +378,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       token,
       mode,
       screen,
+      screenParams,
       active,
+      lastCompletedTripId,
       history,
       loaded,
       error,
@@ -354,6 +390,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateProfile,
       setMode,
       navigate,
+      clearLastCompletedTrip,
       riderRequest,
       riderJoin,
       riderCancel,

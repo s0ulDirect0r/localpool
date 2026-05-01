@@ -1,4 +1,4 @@
-import type { Location, Mode, RideStatus, ServerActiveRider, ServerActiveDriver, ServerHistoryItem, ServerMatch, ServerRequestRow, ServerTripRow, ServerUser } from './types';
+import type { Location, Mode, RideStatus, ServerActiveRider, ServerActiveDriver, ServerHistoryItem, ServerMatch, ServerParticipants, ServerProfile, ServerRating, ServerRequestRow, ServerTripRow, ServerUser } from './types';
 
 const DEFAULT_BASE = 'http://localhost:4000';
 
@@ -62,7 +62,7 @@ export const api = {
   me: (token: string) => request<{ user: ServerUser }>('/me', { token }),
   updateMe: (
     token: string,
-    patch: Partial<Pick<ServerUser, 'name' | 'phone' | 'vehicle' | 'seats'>>,
+    patch: Partial<Pick<ServerUser, 'name' | 'phone' | 'vehicle' | 'seats' | 'bio'>>,
   ) => request<{ user: ServerUser }>('/me', { method: 'PATCH', body: patch, token }),
 
   // Rider
@@ -111,6 +111,27 @@ export const api = {
   // Shared
   history: (token: string) =>
     request<{ history: ServerHistoryItem[] }>('/rides/history', { token }),
+
+  // Profiles + ratings
+  userProfile: (token: string, userId: string) =>
+    request<{ profile: ServerProfile }>(`/users/${encodeURIComponent(userId)}`, { token }),
+  participants: (token: string, tripId: string) =>
+    request<ServerParticipants>(`/rides/${encodeURIComponent(tripId)}/participants`, { token }),
+  submitRating: (
+    token: string,
+    tripId: string,
+    body: { ratee_id: string; stars: number; comment?: string },
+  ) =>
+    request<{ rating: ServerRating }>(`/rides/${encodeURIComponent(tripId)}/ratings`, {
+      method: 'POST',
+      body,
+      token,
+    }),
+  ratingsForTrip: (token: string, tripId: string) =>
+    request<{ submitted: ServerRating[]; received: ServerRating[] }>(
+      `/rides/${encodeURIComponent(tripId)}/ratings`,
+      { token },
+    ),
 };
 
 export type _ApiKeys = keyof typeof api;

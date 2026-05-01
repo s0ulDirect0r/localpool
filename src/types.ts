@@ -25,7 +25,15 @@ export type Screen =
   | 'driver_requests'
   | 'active_ride'
   | 'history'
-  | 'profile';
+  | 'profile'
+  | 'user_profile'
+  | 'rate_participants';
+
+export type ScreenParams = {
+  user_id?: string;
+  trip_id?: string;
+  back_to?: Screen;
+};
 
 // ----- Server-shaped types (snake_case to mirror SQLite rows) -----
 
@@ -36,6 +44,30 @@ export type ServerUser = {
   phone: string;
   vehicle: string | null;
   seats: number | null;
+  bio: string | null;
+};
+
+export type ServerProfile = ServerUser & {
+  rating_avg: number | null;
+  rating_count: number;
+  rides_as_rider: number;
+  rides_as_driver: number;
+};
+
+export type ServerParticipants = {
+  trip: ServerTripRow;
+  driver: ServerProfile;
+  riders: { profile: ServerProfile; request: ServerRequestRow }[];
+};
+
+export type ServerRating = {
+  id: string;
+  trip_id: string;
+  rater_id: string;
+  ratee_id: string;
+  stars: number;
+  comment: string | null;
+  created_at: number;
 };
 
 export type ServerTripRow = {
@@ -90,6 +122,7 @@ export type ServerActiveDriver = {
 export type ServerHistoryItem = {
   kind: 'rider' | 'driver';
   id: string;
+  trip_id: string | null;
   pickup_label: string;
   dropoff_label: string;
   seats: number;

@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   vehicle TEXT,
   seats INTEGER,
+  bio TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -49,6 +50,19 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_rider ON requests(rider_id);
 CREATE INDEX IF NOT EXISTS idx_requests_trip ON requests(trip_id);
+
+CREATE TABLE IF NOT EXISTS ratings (
+  id TEXT PRIMARY KEY,
+  trip_id TEXT NOT NULL REFERENCES trips(id),
+  rater_id TEXT NOT NULL REFERENCES users(id),
+  ratee_id TEXT NOT NULL REFERENCES users(id),
+  stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+  comment TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE (trip_id, rater_id, ratee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ratings_ratee ON ratings(ratee_id);
+CREATE INDEX IF NOT EXISTS idx_ratings_trip ON ratings(trip_id);
 `;
 
 export function openDb(path: string = ':memory:'): DB {

@@ -16,6 +16,7 @@ export function ProfileScreen() {
   const { user, updateProfile, signOut, navigate } = useApp();
   const [vehicle, setVehicle] = useState(user?.vehicle ?? '');
   const [seats, setSeats] = useState(String(user?.seats ?? 3));
+  const [bio, setBio] = useState(user?.bio ?? '');
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -27,6 +28,7 @@ export function ProfileScreen() {
       await updateProfile({
         vehicle: vehicle.trim() || null,
         seats: Math.max(1, Math.min(7, Number(seats) || 3)),
+        bio: bio.trim() || null,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
@@ -50,6 +52,27 @@ export function ProfileScreen() {
           <H2>{user.name}</H2>
           <Muted>{user.email}</Muted>
           <Muted>{user.phone}</Muted>
+          <View style={{ height: 12 }} />
+          <Button
+            title="View public profile"
+            variant="secondary"
+            onPress={() =>
+              navigate('user_profile', { user_id: user.id, back_to: 'profile' })
+            }
+          />
+        </Card>
+
+        <Card>
+          <H2>About you</H2>
+          <Text style={styles.label}>Bio (shown to other carpool members)</Text>
+          <TextInput
+            style={[styles.input, { minHeight: 70, textAlignVertical: 'top' }]}
+            placeholder="e.g. Friendly, no smoking, podcasts welcome"
+            placeholderTextColor="#999"
+            value={bio}
+            onChangeText={setBio}
+            multiline
+          />
         </Card>
 
         <Card>

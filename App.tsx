@@ -7,10 +7,12 @@ import { DriverSetupScreen } from './src/screens/DriverSetup';
 import { HistoryScreen } from './src/screens/History';
 import { HomeScreen } from './src/screens/Home';
 import { ProfileScreen } from './src/screens/Profile';
+import { RateParticipantsScreen } from './src/screens/RateParticipants';
 import { RiderMatchesScreen } from './src/screens/RiderMatches';
 import { RiderRequestScreen } from './src/screens/RiderRequest';
 import { SignInScreen } from './src/screens/SignIn';
 import { SignUpScreen } from './src/screens/SignUp';
+import { UserProfileScreen } from './src/screens/UserProfile';
 import { WelcomeScreen } from './src/screens/Welcome';
 import { AppProvider, useApp } from './src/state/AppContext';
 
@@ -46,6 +48,10 @@ function Router() {
       return <HistoryScreen />;
     case 'profile':
       return <ProfileScreen />;
+    case 'user_profile':
+      return <UserProfileScreen />;
+    case 'rate_participants':
+      return <RateParticipantsScreen />;
     case 'home':
     default:
       return <HomeScreen />;

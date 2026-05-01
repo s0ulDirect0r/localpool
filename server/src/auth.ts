@@ -17,6 +17,7 @@ export function publicUser(u: UserRow): PublicUser {
     phone: u.phone,
     vehicle: u.vehicle,
     seats: u.seats,
+    bio: u.bio,
   };
 }
 

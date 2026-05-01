@@ -1,7 +1,9 @@
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, H1, H2, Muted, Pill, Row, colors } from '../components/ui';
+import { api } from '../api';
 import { useApp } from '../state/AppContext';
+import type { ServerParticipants, ServerProfile } from '../types';
 
 const STATUS_COPY: Record<string, { title: string; sub: string }> = {
   active: { title: 'Trip active', sub: 'Waiting to start.' },
@@ -13,7 +15,29 @@ const STATUS_COPY: Record<string, { title: string; sub: string }> = {
 };
 
 export function ActiveRideScreen() {
-  const { active, mode, riderCancel, driverComplete, driverCancel } = useApp();
+  const { active, user, token, navigate, riderCancel, driverComplete, driverCancel } = useApp();
+  const [participants, setParticipants] = useState<ServerParticipants | null>(null);
+
+  const tripId = active
+    ? active.kind === 'rider'
+      ? active.data.trip?.id ?? null
+      : active.data.trip.id
+    : null;
+
+  const loadParticipants = useCallback(async () => {
+    if (!token || !tripId) return;
+    try {
+      const res = await api.participants(token, tripId);
+      setParticipants(res);
+    } catch {
+      setParticipants(null);
+    }
+  }, [token, tripId]);
+
+  useEffect(() => {
+    loadParticipants();
+  }, [loadParticipants]);
+
   if (!active) return null;
 
   const isDriver = active.kind === 'driver';
@@ -32,6 +56,13 @@ export function ActiveRideScreen() {
   const seatsInfo = isDriver
     ? `${active.data.trip.seats_total - active.data.trip.seats_available} / ${active.data.trip.seats_total}`
     : `${active.data.request.seats}`;
+
+  const companions: ServerProfile[] = participants
+    ? [
+        participants.driver,
+        ...participants.riders.map((r) => r.profile),
+      ].filter((p) => p.id !== user?.id)
+    : [];
 
   return (
     <ScrollView
@@ -58,32 +89,37 @@ export function ActiveRideScreen() {
         </Row>
       </Card>
 
-      {!isDriver && active.data.trip?.driver && (
+      {companions.length > 0 && (
         <Card>
-          <H2>Your driver</H2>
-          <Text style={styles.name}>{active.data.trip.driver.name}</Text>
-          {active.data.trip.driver.vehicle && (
-            <Muted>{active.data.trip.driver.vehicle}</Muted>
-          )}
-        </Card>
-      )}
-
-      {isDriver && active.data.requests.length > 0 && (
-        <Card>
-          <H2>Passengers</H2>
-          {active.data.requests
-            .filter((r) => r.status !== 'cancelled')
-            .map((p) => (
-              <View key={p.id} style={styles.paxRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.name}>{p.rider?.name ?? 'Rider'}</Text>
-                  <Muted>
-                    {p.pickup_label} → {p.dropoff_label}
-                  </Muted>
-                </View>
-                <Text style={styles.fareSmall}>+${p.fare.toFixed(2)}</Text>
+          <H2>Travel companions</H2>
+          {companions.map((c) => (
+            <Pressable
+              key={c.id}
+              onPress={() =>
+                navigate('user_profile', {
+                  user_id: c.id,
+                  back_to: 'active_ride',
+                })
+              }
+              style={styles.compRow}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.name}>{c.name}</Text>
+                {c.vehicle ? <Muted>{c.vehicle}</Muted> : null}
               </View>
-            ))}
+              <View style={{ alignItems: 'flex-end' }}>
+                {c.rating_count > 0 ? (
+                  <Text style={styles.fareSmall}>
+                    ★ {c.rating_avg?.toFixed(1)}{' '}
+                    <Text style={styles.muted}>({c.rating_count})</Text>
+                  </Text>
+                ) : (
+                  <Muted>No ratings</Muted>
+                )}
+                <Text style={styles.tap}>Tap profile ›</Text>
+              </View>
+            </Pressable>
+          ))}
         </Card>
       )}
 
@@ -114,9 +150,6 @@ export function ActiveRideScreen() {
           <Muted>The driver will mark the ride complete when you arrive.</Muted>
         )}
       </View>
-
-      {/* mode is unused but referenced to silence lint when toggled in profile */}
-      {mode === 'rider' && null}
     </ScrollView>
   );
 }
@@ -127,11 +160,14 @@ const styles = StyleSheet.create({
   arrow: { fontSize: 24, color: colors.subtle, marginHorizontal: 8 },
   eta: { fontSize: 26, fontWeight: '700', color: colors.text },
   name: { fontSize: 16, fontWeight: '700', color: colors.text },
-  paxRow: {
+  compRow: {
     flexDirection: 'row',
-    paddingVertical: 8,
+    alignItems: 'center',
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
   fareSmall: { fontSize: 16, fontWeight: '700', color: colors.text },
+  muted: { color: colors.subtle, fontWeight: '500', fontSize: 14 },
+  tap: { color: colors.subtle, fontSize: 12, marginTop: 2 },
 });
