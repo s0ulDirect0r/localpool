@@ -8,285 +8,363 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import type { Driver, Mode, Passenger, Ride, Screen, User } from '../types';
+import { ApiError, api } from '../api';
+import type {
+  Location,
+  Mode,
+  Screen,
+  ServerActiveDriver,
+  ServerActiveRider,
+  ServerHistoryItem,
+  ServerUser,
+} from '../types';
+
+type ActivePayload =
+  | { kind: 'rider'; data: ServerActiveRider }
+  | { kind: 'driver'; data: ServerActiveDriver }
+  | null;
 
 type AppState = {
-  user: User | null;
+  user: ServerUser | null;
+  token: string | null;
   mode: Mode;
   screen: Screen;
-  activeRide: Ride | null;
-  history: Ride[];
+  active: ActivePayload;
+  history: ServerHistoryItem[];
   loaded: boolean;
+  error: string | null;
 };
 
 type AppContextValue = AppState & {
-  signIn: (name: string, email: string, phone: string) => Promise<void>;
+  signUp: (name: string, email: string, phone: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  updateProfile: (patch: Partial<User>) => Promise<void>;
+  updateProfile: (patch: Partial<Pick<ServerUser, 'vehicle' | 'seats' | 'name' | 'phone'>>) => Promise<void>;
   setMode: (m: Mode) => void;
   navigate: (s: Screen) => void;
-  startRiderRequest: (ride: Omit<Ride, 'id' | 'createdAt' | 'role' | 'status'>) => void;
-  selectDriver: (driver: Driver) => void;
-  startDriverTrip: (
-    pickup: Ride['pickup'],
-    dropoff: Ride['dropoff'],
-    seats: number,
-  ) => void;
-  acceptPassenger: (p: Passenger) => void;
-  cancelRide: () => Promise<void>;
-  completeRide: () => Promise<void>;
+  riderRequest: (pickup: Location, dropoff: Location, seats: number) => Promise<void>;
+  riderJoin: (tripId: string) => Promise<void>;
+  riderCancel: () => Promise<void>;
+  driverTrip: (pickup: Location, dropoff: Location, seats: number) => Promise<void>;
+  driverAccept: (requestId: string) => Promise<void>;
+  driverStart: () => Promise<void>;
+  driverComplete: () => Promise<void>;
+  driverCancel: () => Promise<void>;
+  refreshActive: () => Promise<void>;
+  refreshHistory: () => Promise<void>;
+  clearError: () => void;
 };
 
 const STORAGE_KEYS = {
+  token: 'localpool.token',
   user: 'localpool.user',
-  history: 'localpool.history',
   mode: 'localpool.mode',
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+const POLL_MS = 3000;
+
+function readableError(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.code === 'network_error') return 'Could not reach the server. Is it running?';
+    return e.code.replace(/_/g, ' ');
+  }
+  return (e as Error)?.message ?? 'Something went wrong';
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<ServerUser | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [mode, setModeState] = useState<Mode>('rider');
   const [screen, setScreen] = useState<Screen>('welcome');
-  const [activeRide, setActiveRide] = useState<Ride | null>(null);
-  const [history, setHistory] = useState<Ride[]>([]);
+  const [active, setActive] = useState<ActivePayload>(null);
+  const [history, setHistory] = useState<ServerHistoryItem[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const tokenRef = useRef<string | null>(null);
+  const modeRef = useRef<Mode>('rider');
 
-  // Load persisted state once
+  tokenRef.current = token;
+  modeRef.current = mode;
+
+  const fetchActive = useCallback(async (t: string, m: Mode) => {
+    try {
+      if (m === 'rider') {
+        const res = await api.riderActive(t);
+        setActive(res.active ? { kind: 'rider', data: res.active } : null);
+      } else {
+        const res = await api.driverActive(t);
+        setActive(res.active ? { kind: 'driver', data: res.active } : null);
+      }
+    } catch {
+      // swallow polling errors so the UI doesn't flap
+    }
+  }, []);
+
+  const refreshActive = useCallback(async () => {
+    if (!tokenRef.current) return;
+    await fetchActive(tokenRef.current, modeRef.current);
+  }, [fetchActive]);
+
+  const refreshHistory = useCallback(async () => {
+    if (!tokenRef.current) return;
+    try {
+      const res = await api.history(tokenRef.current);
+      setHistory(res.history);
+    } catch (e) {
+      setError(readableError(e));
+    }
+  }, []);
+
+  // Load persisted state
   useEffect(() => {
     (async () => {
       try {
-        const [u, h, m] = await Promise.all([
+        const [t, u, m] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.token),
           AsyncStorage.getItem(STORAGE_KEYS.user),
-          AsyncStorage.getItem(STORAGE_KEYS.history),
           AsyncStorage.getItem(STORAGE_KEYS.mode),
         ]);
-        if (u) {
-          const parsed: User = JSON.parse(u);
-          setUser(parsed);
-          setScreen('home');
-        }
-        if (h) setHistory(JSON.parse(h));
         if (m === 'rider' || m === 'driver') setModeState(m);
-      } catch {
-        // ignore
+        if (t && u) {
+          // Verify token by hitting /me
+          try {
+            const res = await api.me(t);
+            setToken(t);
+            setUser(res.user);
+            setScreen('home');
+            await fetchActive(t, m === 'driver' ? 'driver' : 'rider');
+          } catch {
+            await AsyncStorage.removeItem(STORAGE_KEYS.token);
+            await AsyncStorage.removeItem(STORAGE_KEYS.user);
+          }
+        }
       } finally {
         setLoaded(true);
       }
     })();
+  }, [fetchActive]);
+
+  // Poll active ride while one exists
+  useEffect(() => {
+    if (!token || !active) return;
+    const status = active.kind === 'rider' ? active.data.request.status : active.data.trip.status;
+    if (status === 'completed' || status === 'cancelled') return;
+    const i = setInterval(() => {
+      fetchActive(token, modeRef.current).catch(() => {});
+    }, POLL_MS);
+    return () => clearInterval(i);
+  }, [token, active, fetchActive]);
+
+  const persistAuth = useCallback(async (t: string | null, u: ServerUser | null) => {
+    if (t && u) {
+      await AsyncStorage.setItem(STORAGE_KEYS.token, t);
+      await AsyncStorage.setItem(STORAGE_KEYS.user, JSON.stringify(u));
+    } else {
+      await AsyncStorage.removeItem(STORAGE_KEYS.token);
+      await AsyncStorage.removeItem(STORAGE_KEYS.user);
+    }
   }, []);
 
-  const persistUser = useCallback(async (u: User | null) => {
-    if (u) await AsyncStorage.setItem(STORAGE_KEYS.user, JSON.stringify(u));
-    else await AsyncStorage.removeItem(STORAGE_KEYS.user);
-  }, []);
-
-  const persistHistory = useCallback(async (h: Ride[]) => {
-    await AsyncStorage.setItem(STORAGE_KEYS.history, JSON.stringify(h));
-  }, []);
+  const signUp = useCallback(
+    async (name: string, email: string, phone: string, password: string) => {
+      try {
+        const res = await api.signup({ name, email, phone, password });
+        setToken(res.token);
+        setUser(res.user);
+        await persistAuth(res.token, res.user);
+        setScreen('home');
+        setError(null);
+      } catch (e) {
+        setError(readableError(e));
+        throw e;
+      }
+    },
+    [persistAuth],
+  );
 
   const signIn = useCallback(
-    async (name: string, email: string, phone: string) => {
-      const u: User = {
-        id: `usr_${Date.now()}`,
-        name: name.trim() || 'New User',
-        email: email.trim(),
-        phone: phone.trim(),
-      };
-      setUser(u);
-      await persistUser(u);
-      setScreen('home');
+    async (email: string, password: string) => {
+      try {
+        const res = await api.signin({ email, password });
+        setToken(res.token);
+        setUser(res.user);
+        await persistAuth(res.token, res.user);
+        setScreen('home');
+        setError(null);
+        await fetchActive(res.token, modeRef.current);
+      } catch (e) {
+        setError(readableError(e));
+        throw e;
+      }
     },
-    [persistUser],
+    [persistAuth, fetchActive],
   );
 
   const signOut = useCallback(async () => {
+    setToken(null);
     setUser(null);
-    setActiveRide(null);
+    setActive(null);
+    setHistory([]);
     setScreen('welcome');
-    await persistUser(null);
-  }, [persistUser]);
+    await persistAuth(null, null);
+  }, [persistAuth]);
 
   const updateProfile = useCallback(
-    async (patch: Partial<User>) => {
-      if (!user) return;
-      const next = { ...user, ...patch };
-      setUser(next);
-      await persistUser(next);
+    async (patch: Partial<Pick<ServerUser, 'vehicle' | 'seats' | 'name' | 'phone'>>) => {
+      if (!token) return;
+      try {
+        const res = await api.updateMe(token, patch);
+        setUser(res.user);
+        await AsyncStorage.setItem(STORAGE_KEYS.user, JSON.stringify(res.user));
+      } catch (e) {
+        setError(readableError(e));
+        throw e;
+      }
     },
-    [user, persistUser],
+    [token],
   );
 
-  const setMode = useCallback((m: Mode) => {
-    setModeState(m);
-    AsyncStorage.setItem(STORAGE_KEYS.mode, m).catch(() => {});
-  }, []);
+  const setMode = useCallback(
+    (m: Mode) => {
+      setModeState(m);
+      AsyncStorage.setItem(STORAGE_KEYS.mode, m).catch(() => {});
+      if (token) fetchActive(token, m).catch(() => {});
+    },
+    [token, fetchActive],
+  );
 
   const navigate = useCallback((s: Screen) => setScreen(s), []);
 
-  const startRiderRequest = useCallback(
-    (r: Omit<Ride, 'id' | 'createdAt' | 'role' | 'status'>) => {
-      const ride: Ride = {
-        ...r,
-        id: `ride_${Date.now()}`,
-        createdAt: Date.now(),
-        role: 'rider',
-        status: 'searching',
-      };
-      setActiveRide(ride);
+  const wrap = useCallback(
+    async <T,>(fn: (t: string) => Promise<T>): Promise<T> => {
+      if (!token) throw new ApiError(401, 'unauthorized');
+      try {
+        const result = await fn(token);
+        await fetchActive(token, modeRef.current);
+        return result;
+      } catch (e) {
+        setError(readableError(e));
+        throw e;
+      }
+    },
+    [token, fetchActive],
+  );
+
+  const riderRequest = useCallback(
+    async (pickup: Location, dropoff: Location, seats: number) => {
+      await wrap((t) => api.riderRequest(t, { pickup, dropoff, seats }));
       setScreen('rider_matches');
     },
-    [],
+    [wrap],
   );
 
-  const selectDriver = useCallback(
-    (driver: Driver) => {
-      setActiveRide((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          status: 'driver_en_route',
-          driver,
-          fare: driver.fare,
-          etaMinutes: driver.etaMinutes,
-          progressPct: 0,
-        };
-      });
+  const riderJoin = useCallback(
+    async (tripId: string) => {
+      await wrap((t) => api.riderJoin(t, tripId));
       setScreen('active_ride');
     },
-    [],
+    [wrap],
   );
 
-  const startDriverTrip = useCallback(
-    (pickup: Ride['pickup'], dropoff: Ride['dropoff'], seats: number) => {
-      const ride: Ride = {
-        id: `ride_${Date.now()}`,
-        createdAt: Date.now(),
-        role: 'driver',
-        status: 'driver_en_route',
-        pickup,
-        dropoff,
-        seats,
-        fare: 0,
-        passengers: [],
-        etaMinutes: 12,
-        progressPct: 0,
-      };
-      setActiveRide(ride);
+  const riderCancel = useCallback(async () => {
+    await wrap((t) => api.riderCancel(t));
+    setActive(null);
+    setScreen('home');
+    await refreshHistory();
+  }, [wrap, refreshHistory]);
+
+  const driverTrip = useCallback(
+    async (pickup: Location, dropoff: Location, seats: number) => {
+      await wrap((t) => api.driverTrip(t, { pickup, dropoff, seats }));
       setScreen('driver_requests');
     },
-    [],
+    [wrap],
   );
 
-  const acceptPassenger = useCallback((p: Passenger) => {
-    setActiveRide((prev) => {
-      if (!prev) return prev;
-      const passengers = [...(prev.passengers ?? []), p];
-      const fare = +passengers.reduce((s, x) => s + x.fare, 0).toFixed(2);
-      return { ...prev, passengers, fare };
-    });
-  }, []);
+  const driverAccept = useCallback(
+    async (requestId: string) => {
+      await wrap((t) => api.driverAccept(t, requestId));
+    },
+    [wrap],
+  );
 
-  const cancelRide = useCallback(async () => {
-    if (!activeRide) return;
-    const cancelled: Ride = { ...activeRide, status: 'cancelled' };
-    const next = [cancelled, ...history];
-    setHistory(next);
-    await persistHistory(next);
-    setActiveRide(null);
+  const driverStart = useCallback(async () => {
+    await wrap((t) => api.driverStart(t));
+    setScreen('active_ride');
+  }, [wrap]);
+
+  const driverComplete = useCallback(async () => {
+    await wrap((t) => api.driverComplete(t));
+    setActive(null);
     setScreen('home');
-  }, [activeRide, history, persistHistory]);
+    await refreshHistory();
+  }, [wrap, refreshHistory]);
 
-  const completeRide = useCallback(async () => {
-    if (!activeRide) return;
-    const completed: Ride = {
-      ...activeRide,
-      status: 'completed',
-      progressPct: 100,
-    };
-    const next = [completed, ...history];
-    setHistory(next);
-    await persistHistory(next);
-    setActiveRide(null);
+  const driverCancel = useCallback(async () => {
+    await wrap((t) => api.driverCancel(t));
+    setActive(null);
     setScreen('home');
-  }, [activeRide, history, persistHistory]);
+    await refreshHistory();
+  }, [wrap, refreshHistory]);
 
-  // Simulated ride progress: tick every 2s while ride is en route or in progress
-  useEffect(() => {
-    if (!activeRide) {
-      if (tickRef.current) clearInterval(tickRef.current);
-      tickRef.current = null;
-      return;
-    }
-    if (
-      activeRide.status !== 'driver_en_route' &&
-      activeRide.status !== 'in_progress'
-    ) {
-      return;
-    }
-    tickRef.current = setInterval(() => {
-      setActiveRide((prev) => {
-        if (!prev) return prev;
-        if (prev.status === 'driver_en_route') {
-          const nextEta = Math.max(0, (prev.etaMinutes ?? 0) - 1);
-          if (nextEta === 0) {
-            return { ...prev, etaMinutes: 0, status: 'in_progress', progressPct: 0 };
-          }
-          return { ...prev, etaMinutes: nextEta };
-        }
-        if (prev.status === 'in_progress') {
-          const next = Math.min(100, (prev.progressPct ?? 0) + 10);
-          return { ...prev, progressPct: next };
-        }
-        return prev;
-      });
-    }, 2000);
-    return () => {
-      if (tickRef.current) clearInterval(tickRef.current);
-      tickRef.current = null;
-    };
-  }, [activeRide?.id, activeRide?.status]);
+  const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo<AppContextValue>(
     () => ({
       user,
+      token,
       mode,
       screen,
-      activeRide,
+      active,
       history,
       loaded,
+      error,
+      signUp,
       signIn,
       signOut,
       updateProfile,
       setMode,
       navigate,
-      startRiderRequest,
-      selectDriver,
-      startDriverTrip,
-      acceptPassenger,
-      cancelRide,
-      completeRide,
+      riderRequest,
+      riderJoin,
+      riderCancel,
+      driverTrip,
+      driverAccept,
+      driverStart,
+      driverComplete,
+      driverCancel,
+      refreshActive,
+      refreshHistory,
+      clearError,
     }),
     [
       user,
+      token,
       mode,
       screen,
-      activeRide,
+      active,
       history,
       loaded,
+      error,
+      signUp,
       signIn,
       signOut,
       updateProfile,
       setMode,
       navigate,
-      startRiderRequest,
-      selectDriver,
-      startDriverTrip,
-      acceptPassenger,
-      cancelRide,
-      completeRide,
+      riderRequest,
+      riderJoin,
+      riderCancel,
+      driverTrip,
+      driverAccept,
+      driverStart,
+      driverComplete,
+      driverCancel,
+      refreshActive,
+      refreshHistory,
+      clearError,
     ],
   );
 

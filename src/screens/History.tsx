@@ -1,12 +1,20 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Card, H1, Muted, Pill, Row, colors } from '../components/ui';
 import { useApp } from '../state/AppContext';
 
 export function HistoryScreen() {
-  const { history, navigate } = useApp();
+  const { history, navigate, refreshHistory } = useApp();
+
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={styles.container}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#fff' }}
+      contentContainerStyle={styles.container}
+    >
       <Pressable onPress={() => navigate('home')}>
         <Text style={styles.back}>‹ Back</Text>
       </Pressable>
@@ -18,30 +26,27 @@ export function HistoryScreen() {
         </Card>
       ) : (
         history.map((r) => (
-          <Card key={r.id}>
+          <Card key={`${r.kind}_${r.id}`}>
             <Row>
               <View style={{ flex: 1 }}>
                 <Text style={styles.title}>
-                  {r.pickup.label} → {r.dropoff.label}
+                  {r.pickup_label} → {r.dropoff_label}
                 </Text>
-                <Muted>{new Date(r.createdAt).toLocaleString()}</Muted>
+                <Muted>{new Date(r.created_at).toLocaleString()}</Muted>
               </View>
               <View style={{ alignItems: 'flex-end', gap: 4 }}>
                 <Text style={styles.fare}>${r.fare.toFixed(2)}</Text>
                 <Pill
                   label={r.status}
-                  tone={r.status === 'completed' ? 'good' : r.status === 'cancelled' ? 'warn' : 'default'}
+                  tone={r.status === 'completed' ? 'good' : 'warn'}
                 />
               </View>
             </Row>
             <View style={{ height: 6 }} />
             <Muted>
-              {r.role === 'rider' ? 'As rider' : 'As driver'} ·{' '}
-              {r.role === 'driver'
-                ? `${(r.passengers ?? []).length} passengers`
-                : r.driver
-                ? `with ${r.driver.name}`
-                : 'unmatched'}
+              {r.kind === 'rider'
+                ? 'As rider'
+                : `As driver · ${r.passenger_count ?? 0} passenger${r.passenger_count === 1 ? '' : 's'}`}
             </Muted>
           </Card>
         ))

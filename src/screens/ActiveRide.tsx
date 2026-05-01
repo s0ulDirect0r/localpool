@@ -4,28 +4,42 @@ import { Button, Card, H1, H2, Muted, Pill, Row, colors } from '../components/ui
 import { useApp } from '../state/AppContext';
 
 const STATUS_COPY: Record<string, { title: string; sub: string }> = {
-  searching: { title: 'Searching…', sub: 'Looking for a carpool match.' },
-  matched: { title: 'Match found', sub: 'Confirming your driver.' },
-  driver_en_route: { title: 'Driver on the way', sub: 'Heading to your pickup.' },
+  active: { title: 'Trip active', sub: 'Waiting to start.' },
+  pending: { title: 'Searching…', sub: 'Looking for a carpool match.' },
+  matched: { title: 'Matched', sub: 'Driver is preparing to head out.' },
   in_progress: { title: 'On the road', sub: 'Enjoy the ride!' },
   completed: { title: 'Completed', sub: 'Thanks for riding.' },
   cancelled: { title: 'Cancelled', sub: '' },
 };
 
 export function ActiveRideScreen() {
-  const { activeRide, completeRide, cancelRide } = useApp();
-  if (!activeRide) return null;
+  const { active, mode, riderCancel, driverComplete, driverCancel } = useApp();
+  if (!active) return null;
 
-  const meta = STATUS_COPY[activeRide.status] ?? STATUS_COPY.searching;
-  const isDriver = activeRide.role === 'driver';
+  const isDriver = active.kind === 'driver';
+  const status = isDriver ? active.data.trip.status : active.data.request.status;
+  const meta = STATUS_COPY[status] ?? STATUS_COPY.matched;
+
+  const pickupLabel = isDriver ? active.data.trip.pickup_label : active.data.request.pickup_label;
+  const dropoffLabel = isDriver
+    ? active.data.trip.dropoff_label
+    : active.data.request.dropoff_label;
+
+  const fare = isDriver
+    ? active.data.requests.reduce((s, r) => s + (r.status !== 'cancelled' ? r.fare : 0), 0)
+    : active.data.request.fare;
+
+  const seatsInfo = isDriver
+    ? `${active.data.trip.seats_total - active.data.trip.seats_available} / ${active.data.trip.seats_total}`
+    : `${active.data.request.seats}`;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={styles.container}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#fff' }}
+      contentContainerStyle={styles.container}
+    >
       <View style={{ gap: 6 }}>
-        <Pill
-          label={isDriver ? 'Driver' : 'Rider'}
-          tone={isDriver ? 'warn' : 'good'}
-        />
+        <Pill label={isDriver ? 'Driver' : 'Rider'} tone={isDriver ? 'warn' : 'good'} />
         <H1>{meta.title}</H1>
         <Muted>{meta.sub}</Muted>
       </View>
@@ -34,62 +48,42 @@ export function ActiveRideScreen() {
         <Row>
           <View style={{ flex: 1 }}>
             <Muted>Pickup</Muted>
-            <Text style={styles.place}>{activeRide.pickup.label}</Text>
+            <Text style={styles.place}>{pickupLabel}</Text>
           </View>
           <Text style={styles.arrow}>→</Text>
           <View style={{ flex: 1, alignItems: 'flex-end' }}>
             <Muted>Drop-off</Muted>
-            <Text style={styles.place}>{activeRide.dropoff.label}</Text>
+            <Text style={styles.place}>{dropoffLabel}</Text>
           </View>
         </Row>
       </Card>
 
-      {activeRide.status === 'driver_en_route' && (
-        <Card>
-          <Row>
-            <H2>ETA</H2>
-            <Text style={styles.eta}>
-              {activeRide.etaMinutes ?? 0} min
-            </Text>
-          </Row>
-          <Muted>Updates every 2 seconds (demo).</Muted>
-        </Card>
-      )}
-
-      {activeRide.status === 'in_progress' && (
-        <Card>
-          <H2>Trip progress</H2>
-          <View style={styles.progressTrack}>
-            <View
-              style={[styles.progressFill, { width: `${activeRide.progressPct ?? 0}%` }]}
-            />
-          </View>
-          <Muted>{activeRide.progressPct ?? 0}% complete</Muted>
-        </Card>
-      )}
-
-      {!isDriver && activeRide.driver && (
+      {!isDriver && active.data.trip?.driver && (
         <Card>
           <H2>Your driver</H2>
-          <Text style={styles.name}>{activeRide.driver.name}</Text>
-          <Muted>★ {activeRide.driver.rating} · {activeRide.driver.vehicle}</Muted>
+          <Text style={styles.name}>{active.data.trip.driver.name}</Text>
+          {active.data.trip.driver.vehicle && (
+            <Muted>{active.data.trip.driver.vehicle}</Muted>
+          )}
         </Card>
       )}
 
-      {isDriver && (activeRide.passengers ?? []).length > 0 && (
+      {isDriver && active.data.requests.length > 0 && (
         <Card>
           <H2>Passengers</H2>
-          {(activeRide.passengers ?? []).map((p) => (
-            <View key={p.id} style={styles.paxRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{p.name}</Text>
-                <Muted>
-                  {p.pickup.label} → {p.dropoff.label}
-                </Muted>
+          {active.data.requests
+            .filter((r) => r.status !== 'cancelled')
+            .map((p) => (
+              <View key={p.id} style={styles.paxRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.name}>{p.rider?.name ?? 'Rider'}</Text>
+                  <Muted>
+                    {p.pickup_label} → {p.dropoff_label}
+                  </Muted>
+                </View>
+                <Text style={styles.fareSmall}>+${p.fare.toFixed(2)}</Text>
               </View>
-              <Text style={styles.fareSmall}>+${p.fare.toFixed(2)}</Text>
-            </View>
-          ))}
+            ))}
         </Card>
       )}
 
@@ -97,27 +91,32 @@ export function ActiveRideScreen() {
         <Row>
           <View>
             <Muted>{isDriver ? 'Earnings' : 'Fare'}</Muted>
-            <Text style={styles.eta}>${activeRide.fare.toFixed(2)}</Text>
+            <Text style={styles.eta}>${fare.toFixed(2)}</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Muted>Seats</Muted>
-            <Text style={styles.fareSmall}>
-              {isDriver
-                ? `${(activeRide.passengers ?? []).reduce((s, p) => s + p.seats, 0)} / ${activeRide.seats}`
-                : activeRide.seats}
-            </Text>
+            <Text style={styles.fareSmall}>{seatsInfo}</Text>
           </View>
         </Row>
       </Card>
 
       <View style={{ gap: 10 }}>
-        {activeRide.status === 'in_progress' && (
-          <Button title="Mark trip complete" onPress={completeRide} />
+        {isDriver && status === 'in_progress' && (
+          <Button title="Mark trip complete" onPress={driverComplete} />
         )}
-        {activeRide.status !== 'in_progress' && (
-          <Button title="Cancel" variant="danger" onPress={cancelRide} />
+        {isDriver && status !== 'in_progress' && (
+          <Button title="Cancel trip" variant="danger" onPress={driverCancel} />
+        )}
+        {!isDriver && status !== 'in_progress' && status !== 'completed' && (
+          <Button title="Cancel ride" variant="danger" onPress={riderCancel} />
+        )}
+        {!isDriver && status === 'in_progress' && (
+          <Muted>The driver will mark the ride complete when you arrive.</Muted>
         )}
       </View>
+
+      {/* mode is unused but referenced to silence lint when toggled in profile */}
+      {mode === 'rider' && null}
     </ScrollView>
   );
 }
@@ -135,12 +134,4 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   fareSmall: { fontSize: 16, fontWeight: '700', color: colors.text },
-  progressTrack: {
-    height: 8,
-    backgroundColor: colors.surface,
-    borderRadius: 999,
-    overflow: 'hidden',
-    marginVertical: 10,
-  },
-  progressFill: { height: '100%', backgroundColor: colors.accent },
 });

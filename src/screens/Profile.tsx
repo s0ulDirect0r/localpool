@@ -17,13 +17,22 @@ export function ProfileScreen() {
   const [vehicle, setVehicle] = useState(user?.vehicle ?? '');
   const [seats, setSeats] = useState(String(user?.seats ?? 3));
   const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   if (!user) return null;
 
   const onSave = async () => {
-    await updateProfile({ vehicle: vehicle.trim(), seats: Math.max(1, Math.min(7, Number(seats) || 3)) });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    setBusy(true);
+    try {
+      await updateProfile({
+        vehicle: vehicle.trim() || null,
+        seats: Math.max(1, Math.min(7, Number(seats) || 3)),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -63,7 +72,11 @@ export function ProfileScreen() {
             onChangeText={setSeats}
           />
           <View style={{ height: 12 }} />
-          <Button title={saved ? 'Saved ✓' : 'Save changes'} onPress={onSave} />
+          <Button
+            title={saved ? 'Saved ✓' : 'Save changes'}
+            loading={busy}
+            onPress={onSave}
+          />
         </Card>
 
         <Button title="Sign out" variant="danger" onPress={signOut} />

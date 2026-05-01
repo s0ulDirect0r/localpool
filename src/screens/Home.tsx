@@ -1,14 +1,30 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, H1, H2, Muted, Pill, Row, colors } from '../components/ui';
 import { useApp } from '../state/AppContext';
 import type { Mode } from '../types';
 
 export function HomeScreen() {
-  const { user, mode, setMode, navigate, activeRide, history } = useApp();
+  const { user, mode, setMode, navigate, active, history, refreshHistory } = useApp();
+
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
+  const activeLabel =
+    active?.kind === 'rider'
+      ? `${active.data.request.pickup_label} → ${active.data.request.dropoff_label}`
+      : active?.kind === 'driver'
+      ? `${active.data.trip.pickup_label} → ${active.data.trip.dropoff_label}`
+      : null;
+  const activeStatus =
+    active?.kind === 'rider' ? active.data.request.status : active?.data.trip.status;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={styles.container}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#fff' }}
+      contentContainerStyle={styles.container}
+    >
       <View style={{ gap: 4 }}>
         <Muted>Welcome back</Muted>
         <H1>{user?.name ?? 'there'}</H1>
@@ -16,17 +32,28 @@ export function HomeScreen() {
 
       <ModeToggle value={mode} onChange={setMode} />
 
-      {activeRide && (
+      {active && (
         <Card style={{ borderColor: colors.accent }}>
           <Row>
             <H2>Active ride</H2>
-            <Pill label={activeRide.status.replace('_', ' ')} tone="good" />
+            {activeStatus && <Pill label={activeStatus.replace('_', ' ')} tone="good" />}
           </Row>
-          <Muted>
-            {activeRide.pickup.label} → {activeRide.dropoff.label}
-          </Muted>
+          {activeLabel && <Muted>{activeLabel}</Muted>}
           <View style={{ height: 10 }} />
-          <Button title="Open ride" onPress={() => navigate('active_ride')} />
+          <Button
+            title={
+              active.kind === 'driver' && active.data.trip.status === 'active'
+                ? 'Manage requests'
+                : 'Open ride'
+            }
+            onPress={() =>
+              navigate(
+                active.kind === 'driver' && active.data.trip.status === 'active'
+                  ? 'driver_requests'
+                  : 'active_ride',
+              )
+            }
+          />
         </Card>
       )}
 
@@ -38,7 +65,7 @@ export function HomeScreen() {
           <Button
             title="Request a carpool"
             onPress={() => navigate('rider_request')}
-            disabled={!!activeRide}
+            disabled={!!active}
           />
         </Card>
       ) : (
@@ -49,7 +76,7 @@ export function HomeScreen() {
           <Button
             title="Start a trip"
             onPress={() => navigate('driver_setup')}
-            disabled={!!activeRide}
+            disabled={!!active}
           />
         </Card>
       )}
@@ -65,13 +92,13 @@ export function HomeScreen() {
           <Muted>No rides yet.</Muted>
         ) : (
           history.slice(0, 3).map((r) => (
-            <View key={r.id} style={styles.historyItem}>
+            <View key={`${r.kind}_${r.id}`} style={styles.historyItem}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.historyTitle}>
-                  {r.pickup.label} → {r.dropoff.label}
+                  {r.pickup_label} → {r.dropoff_label}
                 </Text>
                 <Muted>
-                  {r.role === 'rider' ? 'Rider' : 'Driver'} · {r.status} · ${r.fare.toFixed(2)}
+                  {r.kind === 'rider' ? 'Rider' : 'Driver'} · {r.status} · ${r.fare.toFixed(2)}
                 </Muted>
               </View>
             </View>

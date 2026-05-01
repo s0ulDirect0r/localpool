@@ -6,16 +6,32 @@ import { SAVED_PLACES, distanceLabel, estimateFare } from '../state/mock';
 import type { Location } from '../types';
 
 export function RiderRequestScreen() {
-  const { navigate, startRiderRequest } = useApp();
+  const { navigate, riderRequest, error } = useApp();
   const [pickup, setPickup] = useState<Location | null>(SAVED_PLACES[0]);
   const [dropoff, setDropoff] = useState<Location | null>(null);
   const [seats, setSeats] = useState(1);
+  const [busy, setBusy] = useState(false);
 
   const ready = pickup && dropoff && pickup.label !== dropoff.label;
   const fare = ready ? estimateFare(pickup!, dropoff!, true) : 0;
 
+  const onSubmit = async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    try {
+      await riderRequest(pickup!, dropoff!, seats);
+    } catch {
+      // surfaced
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={styles.container}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#fff' }}
+      contentContainerStyle={styles.container}
+    >
       <Pressable onPress={() => navigate('home')}>
         <Text style={styles.back}>‹ Back</Text>
       </Pressable>
@@ -63,17 +79,17 @@ export function RiderRequestScreen() {
         </Card>
       )}
 
+      {error ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
       <Button
         title="Find carpool matches"
         disabled={!ready}
-        onPress={() =>
-          startRiderRequest({
-            pickup: pickup!,
-            dropoff: dropoff!,
-            seats,
-            fare,
-          })
-        }
+        loading={busy}
+        onPress={onSubmit}
       />
     </ScrollView>
   );
@@ -135,4 +151,12 @@ const styles = StyleSheet.create({
   placeActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   placeText: { fontSize: 15, fontWeight: '500', color: colors.text },
   fare: { fontSize: 24, fontWeight: '700', color: colors.text },
+  errorBox: {
+    backgroundColor: '#fde8e8',
+    borderColor: '#f5a3a3',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+  },
+  errorText: { color: '#7a1212', fontWeight: '600' },
 });

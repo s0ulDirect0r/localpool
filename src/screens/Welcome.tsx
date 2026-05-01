@@ -19,11 +19,11 @@ export function WelcomeScreen() {
         </Muted>
       </View>
       <View style={{ gap: 10 }}>
-        <Button title="Get started" onPress={() => navigate('signup')} />
+        <Button title="Create account" onPress={() => navigate('signup')} />
         <Button
           title="I already have an account"
           variant="secondary"
-          onPress={() => navigate('signup')}
+          onPress={() => navigate('signin')}
         />
       </View>
     </View>

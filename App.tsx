@@ -9,6 +9,7 @@ import { HomeScreen } from './src/screens/Home';
 import { ProfileScreen } from './src/screens/Profile';
 import { RiderMatchesScreen } from './src/screens/RiderMatches';
 import { RiderRequestScreen } from './src/screens/RiderRequest';
+import { SignInScreen } from './src/screens/SignIn';
 import { SignUpScreen } from './src/screens/SignUp';
 import { WelcomeScreen } from './src/screens/Welcome';
 import { AppProvider, useApp } from './src/state/AppContext';
@@ -26,6 +27,7 @@ function Router() {
 
   if (!user) {
     if (screen === 'signup') return <SignUpScreen />;
+    if (screen === 'signin') return <SignInScreen />;
     return <WelcomeScreen />;
   }
 

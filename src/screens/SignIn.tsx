@@ -11,27 +11,21 @@ import {
 import { Button, H1, Muted, colors } from '../components/ui';
 import { useApp } from '../state/AppContext';
 
-export function SignUpScreen() {
-  const { signUp, navigate, error, clearError } = useApp();
-  const [name, setName] = useState('');
+export function SignInScreen() {
+  const { signIn, navigate, error, clearError } = useApp();
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const canSubmit =
-    name.trim().length > 0 &&
-    email.includes('@') &&
-    phone.trim().length >= 7 &&
-    password.length >= 6;
+  const canSubmit = email.includes('@') && password.length > 0;
 
   const onSubmit = async () => {
     if (!canSubmit || busy) return;
     setBusy(true);
     try {
-      await signUp(name, email, phone, password);
+      await signIn(email, password);
     } catch {
-      // error surfaced via context
+      // surfaced via context
     } finally {
       setBusy(false);
     }
@@ -44,32 +38,21 @@ export function SignUpScreen() {
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={{ gap: 6 }}>
-          <H1>Create account</H1>
-          <Muted>Join the carpool — takes a minute.</Muted>
+          <H1>Sign in</H1>
+          <Muted>Welcome back to LocalPool.</Muted>
         </View>
 
         <View style={{ gap: 12 }}>
-          <Field label="Full name" value={name} onChangeText={setName} placeholder="Jane Doe" />
-          <Field
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
+          <Field label="Email" value={email} onChangeText={setEmail}
             placeholder="jane@example.com"
             keyboardType="email-address"
             autoCapitalize="none"
           />
           <Field
-            label="Phone"
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="555-0143"
-            keyboardType="phone-pad"
-          />
-          <Field
             label="Password"
             value={password}
             onChangeText={setPassword}
-            placeholder="At least 6 characters"
+            placeholder="Your password"
             secureTextEntry
             autoCapitalize="none"
           />
@@ -82,13 +65,13 @@ export function SignUpScreen() {
         ) : null}
 
         <View style={{ gap: 10 }}>
-          <Button title="Continue" onPress={onSubmit} loading={busy} disabled={!canSubmit} />
+          <Button title="Sign in" onPress={onSubmit} loading={busy} disabled={!canSubmit} />
           <Button
-            title="Already have an account? Sign in"
+            title="Need an account? Create one"
             variant="ghost"
             onPress={() => {
               clearError();
-              navigate('signin');
+              navigate('signup');
             }}
           />
           <Button

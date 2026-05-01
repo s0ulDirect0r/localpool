@@ -6,15 +6,31 @@ import { SAVED_PLACES, distanceLabel } from '../state/mock';
 import type { Location } from '../types';
 
 export function DriverSetupScreen() {
-  const { navigate, startDriverTrip } = useApp();
+  const { navigate, driverTrip, error } = useApp();
   const [pickup, setPickup] = useState<Location | null>(SAVED_PLACES[0]);
   const [dropoff, setDropoff] = useState<Location | null>(SAVED_PLACES[1]);
   const [seats, setSeats] = useState(3);
+  const [busy, setBusy] = useState(false);
 
   const ready = pickup && dropoff && pickup.label !== dropoff.label;
 
+  const onSubmit = async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    try {
+      await driverTrip(pickup!, dropoff!, seats);
+    } catch {
+      // surfaced
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={styles.container}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#fff' }}
+      contentContainerStyle={styles.container}
+    >
       <Pressable onPress={() => navigate('home')}>
         <Text style={styles.back}>‹ Back</Text>
       </Pressable>
@@ -55,11 +71,13 @@ export function DriverSetupScreen() {
         </Card>
       )}
 
-      <Button
-        title="Go online"
-        disabled={!ready}
-        onPress={() => startDriverTrip(pickup!, dropoff!, seats)}
-      />
+      {error ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
+      <Button title="Go online" disabled={!ready} loading={busy} onPress={onSubmit} />
     </ScrollView>
   );
 }
@@ -120,4 +138,12 @@ const styles = StyleSheet.create({
   placeActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   placeText: { fontSize: 15, fontWeight: '500', color: colors.text },
   dist: { fontSize: 22, fontWeight: '700', color: colors.text },
+  errorBox: {
+    backgroundColor: '#fde8e8',
+    borderColor: '#f5a3a3',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+  },
+  errorText: { color: '#7a1212', fontWeight: '600' },
 });

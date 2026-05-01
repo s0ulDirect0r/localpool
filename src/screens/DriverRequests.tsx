@@ -1,53 +1,70 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, H1, H2, Muted, Pill, Row, colors } from '../components/ui';
+import { api } from '../api';
 import { useApp } from '../state/AppContext';
-import { generatePassengerRequests } from '../state/mock';
-import type { Passenger } from '../types';
+import type { ServerRequestRow, ServerUser } from '../types';
+
+type PendingItem = {
+  request: ServerRequestRow & { rider: ServerUser | null };
+  score: number;
+};
 
 export function DriverRequestsScreen() {
-  const { activeRide, acceptPassenger, navigate, cancelRide } = useApp();
-  const [pool, setPool] = useState<Passenger[]>([]);
-  const [dismissed, setDismissed] = useState<Record<string, true>>({});
+  const { token, active, driverAccept, driverStart, driverCancel } = useApp();
+  const [pending, setPending] = useState<PendingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await api.driverRequests(token);
+      setPending(res.requests);
+    } catch {
+      setPending([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
 
   useEffect(() => {
-    if (!activeRide) return;
-    setPool(generatePassengerRequests(activeRide.pickup, activeRide.dropoff));
-  }, [activeRide?.id]);
+    load();
+    const i = setInterval(load, 4000);
+    return () => clearInterval(i);
+  }, [load]);
 
-  const acceptedIds = useMemo(
-    () => new Set((activeRide?.passengers ?? []).map((p) => p.id)),
-    [activeRide?.passengers],
-  );
-
-  if (!activeRide) return null;
-
-  const seatsTaken = (activeRide.passengers ?? []).reduce((s, p) => s + p.seats, 0);
-  const seatsLeft = activeRide.seats - seatsTaken;
-  const visible = pool.filter((p) => !acceptedIds.has(p.id) && !dismissed[p.id]);
+  if (!active || active.kind !== 'driver') return null;
+  const trip = active.data.trip;
+  const accepted = active.data.requests.filter((r) => r.status === 'matched');
+  const earnings = accepted.reduce((s, r) => s + r.fare, 0);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={styles.container}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#fff' }}
+      contentContainerStyle={styles.container}
+    >
       <H1>Looking for riders</H1>
       <Muted>
-        {activeRide.pickup.label} → {activeRide.dropoff.label} · {seatsLeft} seat
-        {seatsLeft === 1 ? '' : 's'} open
+        {trip.pickup_label} → {trip.dropoff_label} · {trip.seats_available} seat
+        {trip.seats_available === 1 ? '' : 's'} open
       </Muted>
 
       <Card>
         <Row>
           <H2>Accepted</H2>
-          <Pill label={`$${activeRide.fare.toFixed(2)} earned`} tone="good" />
+          <Pill label={`$${earnings.toFixed(2)} potential`} tone="good" />
         </Row>
-        {(activeRide.passengers ?? []).length === 0 ? (
+        {accepted.length === 0 ? (
           <Muted>No passengers yet — accept requests below.</Muted>
         ) : (
-          (activeRide.passengers ?? []).map((p) => (
+          accepted.map((p) => (
             <View key={p.id} style={styles.acceptedRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{p.name}</Text>
+                <Text style={styles.name}>{p.rider?.name ?? 'Rider'}</Text>
                 <Muted>
-                  {p.pickup.label} → {p.dropoff.label} · {p.seats} seat
+                  {p.pickup_label} → {p.dropoff_label} · {p.seats} seat
                   {p.seats === 1 ? '' : 's'}
                 </Muted>
               </View>
@@ -58,45 +75,47 @@ export function DriverRequestsScreen() {
       </Card>
 
       <H2>Nearby requests</H2>
-      {visible.length === 0 ? (
+      {loading && pending.length === 0 ? (
         <Card>
-          <Muted>No more requests right now.</Muted>
+          <ActivityIndicator />
+        </Card>
+      ) : pending.length === 0 ? (
+        <Card>
+          <Muted>No pending requests right now. We'll keep checking.</Muted>
         </Card>
       ) : (
-        visible.map((p) => {
-          const fits = p.seats <= seatsLeft;
+        pending.map((p) => {
+          const fits = p.request.seats <= trip.seats_available;
           return (
-            <Card key={p.id}>
+            <Card key={p.request.id}>
               <Row>
                 <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={styles.name}>{p.name}</Text>
+                  <Text style={styles.name}>{p.request.rider?.name ?? 'Rider'}</Text>
                   <Muted>
-                    {p.pickup.label} → {p.dropoff.label}
+                    {p.request.pickup_label} → {p.request.dropoff_label}
                   </Muted>
                   <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                    <Pill label={`${p.seats} seat${p.seats === 1 ? '' : 's'}`} />
+                    <Pill label={`${p.request.seats} seat${p.request.seats === 1 ? '' : 's'}`} />
                     {!fits && <Pill label="Not enough seats" tone="warn" />}
                   </View>
                 </View>
-                <Text style={styles.fare}>${p.fare.toFixed(2)}</Text>
+                <Text style={styles.fare}>${p.request.fare.toFixed(2)}</Text>
               </Row>
               <View style={{ height: 12 }} />
-              <Row>
-                <Button
-                  title="Decline"
-                  variant="secondary"
-                  onPress={() => setDismissed((d) => ({ ...d, [p.id]: true }))}
-                  fullWidth={false}
-                  style={{ flex: 1, marginRight: 6 }}
-                />
-                <Button
-                  title="Accept"
-                  disabled={!fits}
-                  onPress={() => acceptPassenger(p)}
-                  fullWidth={false}
-                  style={{ flex: 1, marginLeft: 6 }}
-                />
-              </Row>
+              <Button
+                title={acceptingId === p.request.id ? 'Accepting…' : 'Accept'}
+                disabled={!fits || !!acceptingId}
+                loading={acceptingId === p.request.id}
+                onPress={async () => {
+                  setAcceptingId(p.request.id);
+                  try {
+                    await driverAccept(p.request.id);
+                    await load();
+                  } finally {
+                    setAcceptingId(null);
+                  }
+                }}
+              />
             </Card>
           );
         })
@@ -105,10 +124,10 @@ export function DriverRequestsScreen() {
       <View style={{ height: 8 }} />
       <Button
         title="Start driving"
-        disabled={(activeRide.passengers ?? []).length === 0}
-        onPress={() => navigate('active_ride')}
+        disabled={accepted.length === 0}
+        onPress={driverStart}
       />
-      <Button title="Cancel trip" variant="ghost" onPress={cancelRide} />
+      <Button title="Cancel trip" variant="ghost" onPress={driverCancel} />
     </ScrollView>
   );
 }
