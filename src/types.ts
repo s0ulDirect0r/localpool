@@ -37,15 +37,22 @@ export type ScreenParams = {
 
 // ----- Server-shaped types (snake_case to mirror SQLite rows) -----
 
+// Authenticated user shape — name is always present; email/phone are present
+// when this represents you, an active-trip co-participant, or someone you've
+// shared a completed trip with. Public surfaces (matches/requests/strangers'
+// profiles) omit them.
 export type ServerUser = {
   id: string;
   name: string;
-  email: string;
-  phone: string;
+  email?: string;
+  phone?: string;
   vehicle: string | null;
   seats: number | null;
   bio: string | null;
 };
+
+// /me always returns email/phone — type narrows accordingly.
+export type ServerSelfUser = ServerUser & { email: string; phone: string };
 
 export type ServerProfile = ServerUser & {
   rating_avg: number | null;

@@ -83,6 +83,7 @@ describe('participants', () => {
       stranger.token,
     );
     expect(res.status).toBe(403);
+    expect(res.data.error).toBe('not_a_participant');
   });
 });
 
@@ -122,6 +123,7 @@ describe('public profile', () => {
     const u = await createUser(app, 'me@example.com');
     const res = await call(app, 'GET', '/users/usr_nonexistent', undefined, u.token);
     expect(res.status).toBe(404);
+    expect(res.data.error).toBe('user_not_found');
   });
 
   it('PATCH /me updates bio and exposes it via the public profile', async () => {
@@ -192,6 +194,7 @@ describe('ratings', () => {
       s.riderAToken,
     );
     expect(r.status).toBe(400);
+    expect(r.data.error).toBe('invalid_stars');
   });
 
   it('rejects rating before the trip is completed', async () => {
@@ -251,6 +254,7 @@ describe('ratings', () => {
       stranger.token,
     );
     expect(r.status).toBe(403);
+    expect(r.data.error).toBe('not_a_completed_participant');
   });
 
   it('prevents duplicate rater→ratee on the same trip', async () => {

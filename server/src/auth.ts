@@ -2,22 +2,28 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { DB } from './db.js';
-import type { PublicUser, UserRow } from './types.js';
+import type { ContactUser, PublicUser, UserRow } from './types.js';
 
 export type AuthVars = {
   userId: string;
-  user: PublicUser;
+  user: ContactUser;
 };
 
 export function publicUser(u: UserRow): PublicUser {
   return {
     id: u.id,
     name: u.name,
-    email: u.email,
-    phone: u.phone,
     vehicle: u.vehicle,
     seats: u.seats,
     bio: u.bio,
+  };
+}
+
+export function contactUser(u: UserRow): ContactUser {
+  return {
+    ...publicUser(u),
+    email: u.email,
+    phone: u.phone,
   };
 }
 
@@ -56,7 +62,7 @@ export function authMiddleware(db: DB, secret: string): MiddlewareHandler {
       .get(userId) as UserRow | undefined;
     if (!row) return c.json({ error: 'unauthorized' }, 401);
     c.set('userId', row.id);
-    c.set('user', publicUser(row));
+    c.set('user', contactUser(row));
     await next();
   };
 }

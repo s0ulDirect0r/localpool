@@ -17,6 +17,7 @@ import type {
   ServerActiveDriver,
   ServerActiveRider,
   ServerHistoryItem,
+  ServerSelfUser,
   ServerUser,
 } from '../types';
 
@@ -26,7 +27,7 @@ type ActivePayload =
   | null;
 
 type AppState = {
-  user: ServerUser | null;
+  user: ServerSelfUser | null;
   token: string | null;
   mode: Mode;
   screen: Screen;
@@ -78,7 +79,7 @@ function readableError(e: unknown): string {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<ServerUser | null>(null);
+  const [user, setUser] = useState<ServerSelfUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [mode, setModeState] = useState<Mode>('rider');
   const [screen, setScreen] = useState<Screen>('welcome');
@@ -100,16 +101,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const res = await api.riderActive(t);
         setActive((prev) => {
           const next = res.active ? { kind: 'rider' as const, data: res.active } : null;
-          // Detect rider-side completion: had an in_progress trip → now nothing
+          // Detect rider-side ride end: had an in_progress trip, now nothing.
+          // Only auto-route to rating if the trip actually completed; if the
+          // driver cancelled mid-ride, the rider's request is now `cancelled`
+          // and they wouldn't be allowed to rate.
           if (
             !next &&
             prev?.kind === 'rider' &&
             prev.data.request.status === 'in_progress' &&
             prev.data.trip
           ) {
-            setLastCompletedTripId(prev.data.trip.id);
-            setScreen('rate_participants');
-            setScreenParams({ trip_id: prev.data.trip.id, back_to: 'home' });
+            const tripId = prev.data.trip.id;
+            api
+              .participants(t, tripId)
+              .then((p) => {
+                if (p.trip.status === 'completed') {
+                  setLastCompletedTripId(tripId);
+                  setScreen('rate_participants');
+                  setScreenParams({ trip_id: tripId, back_to: 'home' });
+                } else {
+                  setScreen('home');
+                }
+              })
+              .catch(() => {
+                // Driver cancelled cascade revoked our participation — just
+                // go home. Server will surface no error worth blocking on.
+                setScreen('home');
+              });
           }
           return next;
         });

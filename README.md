@@ -16,24 +16,43 @@ In one terminal — start the backend:
 
 ```bash
 cd server
-npm install
-npm start          # listens on http://localhost:4000
+JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))") npm start
+# listens on http://localhost:4000
 ```
+
+`JWT_SECRET` is required (≥ 16 chars). The server refuses to boot without it.
 
 In another terminal — start the Expo app:
 
 ```bash
 npm install
+npm run web        # browser, talks to http://localhost:4000 by default
 npm run ios        # iOS simulator (requires macOS)
-npm run android    # Android emulator
-npm run web        # browser
+npm run android    # Android emulator (use 10.0.2.2 instead of localhost)
 ```
 
-Pointing the app at a non-default backend URL:
+### Running on a physical phone via Expo Go
+
+`localhost` on a phone refers to the phone itself, so you have to point the
+app at the dev machine's LAN IP and the server has to bind to that interface
+too.
 
 ```bash
-EXPO_PUBLIC_API_URL=http://192.168.1.50:4000 npm run ios
+# 1. Find your LAN IP (e.g. 192.168.1.50)
+ipconfig getifaddr en0   # macOS
+hostname -I              # Linux
+
+# 2. Start the server on all interfaces:
+HOST=0.0.0.0 PORT=4000 JWT_SECRET=... npm start
+
+# 3. Start Expo with the LAN URL baked in:
+EXPO_PUBLIC_API_URL=http://192.168.1.50:4000 npm run ios   # or :android
 ```
+
+The app's `app.json` enables an iOS App Transport Security exception
+(`NSAllowsArbitraryLoads`) and Android cleartext traffic so the demo can
+talk to a plain-HTTP local server. **Strip both before any production
+build.**
 
 ## What's in here
 

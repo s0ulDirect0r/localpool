@@ -30,7 +30,10 @@ describe('rider + driver carpool flow', () => {
     expect(matches.status).toBe(200);
     expect(matches.data.matches.length).toBeGreaterThanOrEqual(1);
     const top = matches.data.matches[0];
-    expect(top.trip.driver.email).toBe('d1@example.com');
+    expect(top.trip.driver.name).toBe('Test User');
+    // Discovery surface MUST NOT leak contact info pre-join.
+    expect(top.trip.driver.email).toBeUndefined();
+    expect(top.trip.driver.phone).toBeUndefined();
 
     const join = await call(
       app,
@@ -112,7 +115,10 @@ describe('rider + driver carpool flow', () => {
     expect(list.status).toBe(200);
     expect(list.data.requests.length).toBe(1);
     expect(list.data.requests[0].request.id).toBe(requestId);
-    expect(list.data.requests[0].request.rider.email).toBe('r3@example.com');
+    expect(list.data.requests[0].request.rider.name).toBe('Test User');
+    // Discovery surface MUST NOT leak contact info pre-accept.
+    expect(list.data.requests[0].request.rider.email).toBeUndefined();
+    expect(list.data.requests[0].request.rider.phone).toBeUndefined();
 
     const accept = await call(
       app,
@@ -168,6 +174,7 @@ describe('rider + driver carpool flow', () => {
       rider.token,
     );
     expect(dup.status).toBe(409);
+    expect(dup.data.error).toBe('already_active');
   });
 
   it('cancels a matched ride and returns seats to the trip', async () => {
@@ -213,6 +220,7 @@ describe('rider + driver carpool flow', () => {
     );
     const start = await call(app, 'POST', '/driver/start', undefined, driver.token);
     expect(start.status).toBe(409);
+    expect(start.data.error).toBe('no_passengers');
   });
 
   it('driver cancel marks all matched riders cancelled', async () => {

@@ -23,6 +23,7 @@ describe('auth', () => {
       password: 'short1',
     });
     expect(res.status).toBe(400);
+    expect(res.data.error).toBe('missing_fields');
   });
 
   it('rejects signup with a short password', async () => {
@@ -47,6 +48,7 @@ describe('auth', () => {
       password: 'hunter22',
     });
     expect(res.status).toBe(409);
+    expect(res.data.error).toBe('email_taken');
   });
 
   it('signs in with correct credentials', async () => {
@@ -68,6 +70,7 @@ describe('auth', () => {
       password: 'incorrect',
     });
     expect(res.status).toBe(401);
+    expect(res.data.error).toBe('invalid_credentials');
   });
 
   it('rejects signin for unknown email', async () => {
@@ -77,6 +80,7 @@ describe('auth', () => {
       password: 'whatever1',
     });
     expect(res.status).toBe(401);
+    expect(res.data.error).toBe('invalid_credentials');
   });
 
   it('returns the current user with /me', async () => {
@@ -91,12 +95,14 @@ describe('auth', () => {
     const { app } = makeApp();
     const res = await call(app, 'GET', '/me');
     expect(res.status).toBe(401);
+    expect(res.data.error).toBe('unauthorized');
   });
 
   it('rejects /me with a malformed token', async () => {
     const { app } = makeApp();
     const res = await call(app, 'GET', '/me', undefined, 'not-a-token');
     expect(res.status).toBe(401);
+    expect(res.data.error).toBe('unauthorized');
   });
 
   it('updates profile via PATCH /me', async () => {

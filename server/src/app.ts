@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import {
   authMiddleware,
+  contactUser,
   hashPassword,
   publicUser,
   signToken,
@@ -11,13 +12,12 @@ import {
 import { openDb, type DB } from './db.js';
 import { estimateFare, scoreTripForRequest } from './match.js';
 import type {
+  ContactUser,
   ProfileSummary,
   PublicUser,
   RatingRow,
   RequestRow,
-  RequestStatus,
   TripRow,
-  TripStatus,
   UserRow,
 } from './types.js';
 
@@ -25,9 +25,11 @@ type Env = { Variables: AuthVars };
 
 export type AppOptions = {
   dbPath?: string;
-  secret?: string;
+  secret: string;
   db?: DB;
 };
+
+const MAX_SEATS = 7;
 
 function id(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -63,26 +65,27 @@ function getRequestsForTrip(db: DB, tripId: string): RequestRow[] {
     .all(tripId) as RequestRow[];
 }
 
-function loadUser(db: DB, userId: string): PublicUser | null {
-  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow | undefined;
+function loadUserRow(db: DB, userId: string): UserRow | null {
+  return (db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow | undefined) ?? null;
+}
+
+function loadPublicUser(db: DB, userId: string): PublicUser | null {
+  const row = loadUserRow(db, userId);
   return row ? publicUser(row) : null;
 }
 
-function tripWithDriver(db: DB, trip: TripRow) {
-  const driver = loadUser(db, trip.driver_id);
-  return { ...trip, driver };
+function loadContactUser(db: DB, userId: string): ContactUser | null {
+  const row = loadUserRow(db, userId);
+  return row ? contactUser(row) : null;
 }
 
-function requestWithRider(db: DB, req: RequestRow) {
-  const rider = loadUser(db, req.rider_id);
-  return { ...req, rider };
-}
-
-export function createApp(opts: AppOptions = {}) {
+export function createApp(opts: AppOptions) {
   const db = opts.db ?? openDb(opts.dbPath);
-  const secret = opts.secret ?? process.env.JWT_SECRET ?? 'dev-secret-change-me';
+  const secret = opts.secret;
+  if (!secret) throw new Error('createApp requires opts.secret');
 
   const app = new Hono<Env>();
+  // TODO: restrict to known origins in production.
   app.use('*', cors());
 
   app.get('/health', (c) => c.json({ ok: true }));
@@ -109,7 +112,7 @@ export function createApp(opts: AppOptions = {}) {
       `INSERT INTO users (id, name, email, phone, password_hash, vehicle, seats, bio, created_at)
        VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?)`,
     ).run(userId, name.trim(), email.toLowerCase().trim(), phone.trim(), hash, Date.now());
-    const user = loadUser(db, userId)!;
+    const user = loadContactUser(db, userId)!;
     const token = signToken(secret, userId);
     return c.json({ token, user }, 201);
   });
@@ -126,7 +129,7 @@ export function createApp(opts: AppOptions = {}) {
     const ok = await verifyPassword(password, row.password_hash);
     if (!ok) return c.json({ error: 'invalid_credentials' }, 401);
     const token = signToken(secret, row.id);
-    return c.json({ token, user: publicUser(row) });
+    return c.json({ token, user: contactUser(row) });
   });
 
   // ---------- Authenticated routes ----------
@@ -147,7 +150,7 @@ export function createApp(opts: AppOptions = {}) {
     }
     if (typeof seats === 'number') {
       updates.push('seats = ?');
-      values.push(Math.max(1, Math.min(7, Math.floor(seats))));
+      values.push(Math.max(1, Math.min(MAX_SEATS, Math.floor(seats))));
     }
     if (typeof name === 'string' && name.trim()) {
       updates.push('name = ?');
@@ -168,7 +171,7 @@ export function createApp(opts: AppOptions = {}) {
       values.push(userId);
       db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
     }
-    return c.json({ user: loadUser(db, userId) });
+    return c.json({ user: loadContactUser(db, userId) });
   });
 
   // ---------- Rider ----------
@@ -184,8 +187,11 @@ export function createApp(opts: AppOptions = {}) {
       dropoff?: { label: string; lat: number; lng: number };
       seats?: number;
     };
-    if (!pickup || !dropoff || !seats || seats < 1) {
+    if (!pickup || !dropoff || !seats) {
       return c.json({ error: 'missing_fields' }, 400);
+    }
+    if (!Number.isInteger(seats) || seats < 1 || seats > MAX_SEATS) {
+      return c.json({ error: 'invalid_seats' }, 400);
     }
     const fare = estimateFare(pickup, dropoff, true);
     const reqId = id('req');
@@ -210,6 +216,25 @@ export function createApp(opts: AppOptions = {}) {
     return c.json({ request: created }, 201);
   });
 
+  // Discovery surface — embeds PUBLIC user info only (no email/phone).
+  function tripWithPublicDriver(trip: TripRow) {
+    return { ...trip, driver: loadPublicUser(db, trip.driver_id) };
+  }
+
+  // Active-trip surface — embeds CONTACT user info (you're sharing a ride
+  // with this person, you need to be able to coordinate).
+  function tripWithContactDriver(trip: TripRow) {
+    return { ...trip, driver: loadContactUser(db, trip.driver_id) };
+  }
+
+  function requestWithPublicRider(req: RequestRow) {
+    return { ...req, rider: loadPublicUser(db, req.rider_id) };
+  }
+
+  function requestWithContactRider(req: RequestRow) {
+    return { ...req, rider: loadContactUser(db, req.rider_id) };
+  }
+
   app.get('/rider/matches', auth, (c) => {
     const userId = c.get('userId');
     const req = getActiveRequest(db, userId);
@@ -224,7 +249,7 @@ export function createApp(opts: AppOptions = {}) {
       .all(req.seats) as TripRow[];
     const scored = trips
       .map((t) => ({
-        trip: tripWithDriver(db, t),
+        trip: tripWithPublicDriver(t),
         score: scoreTripForRequest(t, req),
         fare: req.fare,
       }))
@@ -248,16 +273,26 @@ export function createApp(opts: AppOptions = {}) {
     if (trip.seats_available < req.seats) {
       return c.json({ error: 'not_enough_seats' }, 409);
     }
+    let success = false;
     const tx = db.transaction(() => {
-      db.prepare(`UPDATE requests SET trip_id = ?, status = 'matched' WHERE id = ?`).run(
-        trip.id,
-        req.id,
-      );
-      db.prepare(
-        `UPDATE trips SET seats_available = seats_available - ? WHERE id = ?`,
-      ).run(req.seats, trip.id);
+      // Conditional decrement so that even under hypothetical concurrent
+      // joins (multi-process), we never let seats go negative.
+      const r = db
+        .prepare(
+          `UPDATE trips SET seats_available = seats_available - ?
+           WHERE id = ? AND status = 'active' AND seats_available >= ?`,
+        )
+        .run(req.seats, trip.id, req.seats);
+      if (r.changes === 1) {
+        db.prepare(`UPDATE requests SET trip_id = ?, status = 'matched' WHERE id = ?`).run(
+          trip.id,
+          req.id,
+        );
+        success = true;
+      }
     });
     tx();
+    if (!success) return c.json({ error: 'not_enough_seats' }, 409);
     return c.json({
       request: db.prepare('SELECT * FROM requests WHERE id = ?').get(req.id),
       trip: getTrip(db, trip.id),
@@ -272,7 +307,7 @@ export function createApp(opts: AppOptions = {}) {
     return c.json({
       active: {
         request: req,
-        trip: trip ? tripWithDriver(db, trip) : null,
+        trip: trip ? tripWithContactDriver(trip) : null,
       },
     });
   });
@@ -306,8 +341,11 @@ export function createApp(opts: AppOptions = {}) {
       dropoff?: { label: string; lat: number; lng: number };
       seats?: number;
     };
-    if (!pickup || !dropoff || !seats || seats < 1) {
+    if (!pickup || !dropoff || !seats) {
       return c.json({ error: 'missing_fields' }, 400);
+    }
+    if (!Number.isInteger(seats) || seats < 1 || seats > MAX_SEATS) {
+      return c.json({ error: 'invalid_seats' }, 400);
     }
     const tripId = id('trp');
     db.prepare(
@@ -341,7 +379,7 @@ export function createApp(opts: AppOptions = {}) {
       .all(trip.seats_available) as RequestRow[];
     const scored = pending
       .map((r) => ({
-        request: requestWithRider(db, r),
+        request: requestWithPublicRider(r),
         score: scoreTripForRequest(trip, r),
       }))
       .sort((a, b) => a.score - b.score);
@@ -363,16 +401,33 @@ export function createApp(opts: AppOptions = {}) {
     if (!req) return c.json({ error: 'request_not_found' }, 404);
     if (req.status !== 'pending') return c.json({ error: 'request_not_pending' }, 409);
     if (req.seats > trip.seats_available) return c.json({ error: 'not_enough_seats' }, 409);
+    let success = false;
     const tx = db.transaction(() => {
-      db.prepare(`UPDATE requests SET trip_id = ?, status = 'matched' WHERE id = ?`).run(
-        trip.id,
-        req.id,
-      );
-      db.prepare(
-        `UPDATE trips SET seats_available = seats_available - ? WHERE id = ?`,
-      ).run(req.seats, trip.id);
+      const r = db
+        .prepare(
+          `UPDATE trips SET seats_available = seats_available - ?
+           WHERE id = ? AND status = 'active' AND seats_available >= ?`,
+        )
+        .run(req.seats, trip.id, req.seats);
+      if (r.changes === 1) {
+        // Re-check the request hasn't been matched concurrently.
+        const upd = db
+          .prepare(
+            `UPDATE requests SET trip_id = ?, status = 'matched' WHERE id = ? AND status = 'pending'`,
+          )
+          .run(trip.id, req.id);
+        if (upd.changes === 1) {
+          success = true;
+        } else {
+          // Roll back the seat decrement.
+          db.prepare(
+            `UPDATE trips SET seats_available = seats_available + ? WHERE id = ?`,
+          ).run(req.seats, trip.id);
+        }
+      }
     });
     tx();
+    if (!success) return c.json({ error: 'request_already_matched' }, 409);
     return c.json({
       trip: getTrip(db, trip.id),
       request: db.prepare('SELECT * FROM requests WHERE id = ?').get(req.id),
@@ -429,7 +484,7 @@ export function createApp(opts: AppOptions = {}) {
     const userId = c.get('userId');
     const trip = getActiveTrip(db, userId);
     if (!trip) return c.json({ active: null });
-    const requests = getRequestsForTrip(db, trip.id).map((r) => requestWithRider(db, r));
+    const requests = getRequestsForTrip(db, trip.id).map(requestWithContactRider);
     return c.json({ active: { trip, requests } });
   });
 
@@ -480,8 +535,9 @@ export function createApp(opts: AppOptions = {}) {
   });
 
   // ---------- Public profiles + ratings ----------
-  function profileSummary(userId: string): ProfileSummary | null {
-    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow | undefined;
+  // Profile summary callers ask for the variant they're allowed to see.
+  function profileSummary(userId: string, viewerId: string): ProfileSummary | null {
+    const u = loadUserRow(db, userId);
     if (!u) return null;
     const agg = db
       .prepare('SELECT AVG(stars) AS avg, COUNT(*) AS count FROM ratings WHERE ratee_id = ?')
@@ -500,22 +556,39 @@ export function createApp(opts: AppOptions = {}) {
         )
         .get(userId) as { c: number }
     ).c;
-    return {
+    // Contact info is only attached when the viewer is the user themselves
+    // or when they share a trip (handled by callers via `attachContact`).
+    const base: ProfileSummary = {
       ...publicUser(u),
       rating_avg: agg.avg !== null ? +agg.avg.toFixed(2) : null,
       rating_count: agg.count,
       rides_as_rider: ridesAsRider,
       rides_as_driver: ridesAsDriver,
     };
+    if (viewerId === userId) {
+      base.email = u.email;
+      base.phone = u.phone;
+    }
+    return base;
+  }
+
+  function attachContact(profile: ProfileSummary, userId: string): ProfileSummary {
+    const u = loadUserRow(db, userId);
+    if (!u) return profile;
+    return { ...profile, email: u.email, phone: u.phone };
   }
 
   app.get('/users/:id', auth, (c) => {
+    const viewerId = c.get('userId');
     const target = c.req.param('id');
-    const profile = profileSummary(target);
+    const profile = profileSummary(target, viewerId);
     if (!profile) return c.json({ error: 'user_not_found' }, 404);
     return c.json({ profile });
   });
 
+  // Returns the full participant set. When the trip is `completed`, only
+  // riders who actually completed the trip are included (cancelled and
+  // never-matched requests are filtered out — they didn't ride).
   function tripParticipants(tripId: string): {
     trip: TripRow;
     driver: PublicUser;
@@ -523,12 +596,15 @@ export function createApp(opts: AppOptions = {}) {
   } | null {
     const trip = getTrip(db, tripId);
     if (!trip) return null;
-    const driver = loadUser(db, trip.driver_id);
+    const driver = loadPublicUser(db, trip.driver_id);
     if (!driver) return null;
+    const completedOnly = trip.status === 'completed';
     const riders = getRequestsForTrip(db, tripId)
-      .filter((r) => r.status !== 'cancelled')
+      .filter((r) =>
+        completedOnly ? r.status === 'completed' : r.status !== 'cancelled',
+      )
       .map((r) => {
-        const user = loadUser(db, r.rider_id);
+        const user = loadPublicUser(db, r.rider_id);
         return user ? { user, request: r } : null;
       })
       .filter((x): x is { user: PublicUser; request: RequestRow } => x !== null);
@@ -555,9 +631,10 @@ export function createApp(opts: AppOptions = {}) {
     }
     const data = tripParticipants(tripId);
     if (!data) return c.json({ error: 'trip_not_found' }, 404);
-    const driverProfile = profileSummary(data.driver.id)!;
+    // Co-participants get contact info — they share or shared a trip.
+    const driverProfile = attachContact(profileSummary(data.driver.id, userId)!, data.driver.id);
     const riders = data.riders.map((r) => ({
-      profile: profileSummary(r.user.id)!,
+      profile: attachContact(profileSummary(r.user.id, userId)!, r.user.id),
       request: r.request,
     }));
     return c.json({ trip: data.trip, driver: driverProfile, riders });

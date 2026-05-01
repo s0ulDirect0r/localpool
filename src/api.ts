@@ -1,4 +1,4 @@
-import type { Location, Mode, RideStatus, ServerActiveRider, ServerActiveDriver, ServerHistoryItem, ServerMatch, ServerParticipants, ServerProfile, ServerRating, ServerRequestRow, ServerTripRow, ServerUser } from './types';
+import type { Location, Mode, RideStatus, ServerActiveRider, ServerActiveDriver, ServerHistoryItem, ServerMatch, ServerParticipants, ServerProfile, ServerRating, ServerRequestRow, ServerSelfUser, ServerTripRow, ServerUser } from './types';
 
 const DEFAULT_BASE = 'http://localhost:4000';
 
@@ -52,18 +52,18 @@ async function request<T>(
 }
 
 // ---------- Auth ----------
-export type AuthResponse = { token: string; user: ServerUser };
+export type AuthResponse = { token: string; user: ServerSelfUser };
 
 export const api = {
   signup: (body: { name: string; email: string; phone: string; password: string }) =>
     request<AuthResponse>('/auth/signup', { method: 'POST', body }),
   signin: (body: { email: string; password: string }) =>
     request<AuthResponse>('/auth/signin', { method: 'POST', body }),
-  me: (token: string) => request<{ user: ServerUser }>('/me', { token }),
+  me: (token: string) => request<{ user: ServerSelfUser }>('/me', { token }),
   updateMe: (
     token: string,
     patch: Partial<Pick<ServerUser, 'name' | 'phone' | 'vehicle' | 'seats' | 'bio'>>,
-  ) => request<{ user: ServerUser }>('/me', { method: 'PATCH', body: patch, token }),
+  ) => request<{ user: ServerSelfUser }>('/me', { method: 'PATCH', body: patch, token }),
 
   // Rider
   riderRequest: (
