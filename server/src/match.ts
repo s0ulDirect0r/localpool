@@ -18,7 +18,8 @@ export function estimateFare(
 
 // Score a trip against a request: lower is better.
 // We use the sum of (rider pickup ↔ trip pickup) and (rider dropoff ↔ trip dropoff)
-// distances as a rough "detour" proxy. Reject if dropoffs are far apart.
+// distances as a rough "detour" proxy. Callers sort by this score; no trip is
+// rejected outright — with demo-scale supply, a far match beats no match.
 export function scoreTripForRequest(trip: TripRow, req: RequestRow): number {
   const pickupDelta = distanceMiles(
     { label: '', lat: trip.pickup_lat, lng: trip.pickup_lng },

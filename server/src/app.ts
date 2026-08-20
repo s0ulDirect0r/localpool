@@ -515,7 +515,9 @@ export function createApp(opts: AppOptions) {
         trip: r.trip_id ? getTrip(db, r.trip_id) : null,
       })),
       ...myTrips.map((t) => {
-        const reqs = getRequestsForTrip(db, t.id);
+        // Cancelled riders never paid — exclude them from earnings and
+        // headcount (matches what the live ActiveRide screen shows).
+        const reqs = getRequestsForTrip(db, t.id).filter((x) => x.status !== 'cancelled');
         const earnings = reqs.reduce((s, x) => s + x.fare, 0);
         return {
           kind: 'driver' as const,

@@ -125,6 +125,6 @@ describe('auth', () => {
     const { token } = await createUser(app, 'big@example.com');
     const res = await call(app, 'PATCH', '/me', { seats: 500 }, token);
     expect(res.status).toBe(200);
-    expect(res.data.user.seats).toBeLessThanOrEqual(7);
+    expect(res.data.user.seats).toBe(7);
   });
 });

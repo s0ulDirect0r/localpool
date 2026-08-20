@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, H1, Muted, Pill, Row, colors } from '../components/ui';
-import { api } from '../api';
+import { ApiError, api } from '../api';
 import { useApp } from '../state/AppContext';
 import type { ServerMatch } from '../types';
 
@@ -9,17 +9,28 @@ export function RiderMatchesScreen() {
   const { token, active, riderJoin, riderCancel } = useApp();
   const [matches, setMatches] = useState<ServerMatch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const [joiningId, setJoiningId] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   const load = useCallback(async () => {
-    if (!token) return;
+    if (!token || inFlight.current) return;
+    inFlight.current = true;
     setLoading(true);
     try {
       const res = await api.riderMatches(token);
       setMatches(res.matches);
-    } catch {
-      setMatches([]);
+      setLoadError(null);
+    } catch (e) {
+      // Keep whatever we had; a dead server is not "no matches".
+      setLoadError(
+        e instanceof ApiError && e.code === 'network_error'
+          ? 'Cannot reach the server — is it running?'
+          : 'Failed to load matches — retrying…',
+      );
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }, [token]);
@@ -49,11 +60,22 @@ export function RiderMatchesScreen() {
         </Muted>
       </View>
 
-      {loading && matches.length === 0 ? (
+      {loadError ? (
+        <Card style={{ borderColor: '#f5a3a3' }}>
+          <Text style={styles.errorText}>{loadError}</Text>
+        </Card>
+      ) : null}
+      {joinError ? (
+        <Card style={{ borderColor: '#f5a3a3' }}>
+          <Text style={styles.errorText}>{joinError}</Text>
+        </Card>
+      ) : null}
+
+      {loading && matches.length === 0 && !loadError ? (
         <Card>
           <ActivityIndicator />
         </Card>
-      ) : matches.length === 0 ? (
+      ) : matches.length === 0 && !loadError ? (
         <Card>
           <Muted>No matches yet — we'll keep looking. Pull a driver online to test.</Muted>
         </Card>
@@ -94,8 +116,16 @@ export function RiderMatchesScreen() {
                 disabled={!!joiningId}
                 onPress={async () => {
                   setJoiningId(t.id);
+                  setJoinError(null);
                   try {
                     await riderJoin(t.id);
+                  } catch (e) {
+                    setJoinError(
+                      e instanceof ApiError && e.code === 'not_enough_seats'
+                        ? 'That carpool just filled up — pick another.'
+                        : 'Could not join — try again.',
+                    );
+                    load();
                   } finally {
                     setJoiningId(null);
                   }
@@ -114,4 +144,5 @@ const styles = StyleSheet.create({
   back: { fontSize: 16, color: colors.subtle },
   name: { fontSize: 16, fontWeight: '700', color: colors.text },
   fare: { fontSize: 22, fontWeight: '700', color: colors.text },
+  errorText: { color: '#7a1212', fontWeight: '600' },
 });

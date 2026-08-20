@@ -24,9 +24,9 @@ CREATE TABLE IF NOT EXISTS trips (
   dropoff_label TEXT NOT NULL,
   dropoff_lat REAL NOT NULL,
   dropoff_lng REAL NOT NULL,
-  seats_total INTEGER NOT NULL,
-  seats_available INTEGER NOT NULL,
-  status TEXT NOT NULL,
+  seats_total INTEGER NOT NULL CHECK (seats_total BETWEEN 1 AND 7),
+  seats_available INTEGER NOT NULL CHECK (seats_available BETWEEN 0 AND 7),
+  status TEXT NOT NULL CHECK (status IN ('active','in_progress','completed','cancelled')),
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
@@ -42,9 +42,9 @@ CREATE TABLE IF NOT EXISTS requests (
   dropoff_label TEXT NOT NULL,
   dropoff_lat REAL NOT NULL,
   dropoff_lng REAL NOT NULL,
-  seats INTEGER NOT NULL,
-  fare REAL NOT NULL,
-  status TEXT NOT NULL,
+  seats INTEGER NOT NULL CHECK (seats BETWEEN 1 AND 7),
+  fare REAL NOT NULL CHECK (fare >= 0),
+  status TEXT NOT NULL CHECK (status IN ('pending','matched','in_progress','completed','cancelled')),
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);

@@ -44,7 +44,13 @@ export function UserProfileScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={styles.container}>
-      <Pressable onPress={() => navigate(backTo)}>
+      <Pressable
+        onPress={() =>
+          // Forward trip_id so screens that need it (rate_participants)
+          // don't come back blank.
+          navigate(backTo, { trip_id: screenParams.trip_id })
+        }
+      >
         <Text style={styles.back}>‹ Back</Text>
       </Pressable>
 

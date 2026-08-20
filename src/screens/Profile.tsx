@@ -19,11 +19,13 @@ export function ProfileScreen() {
   const [bio, setBio] = useState(user?.bio ?? '');
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   if (!user) return null;
 
   const onSave = async () => {
     setBusy(true);
+    setSaveError(null);
     try {
       await updateProfile({
         vehicle: vehicle.trim() || null,
@@ -32,6 +34,8 @@ export function ProfileScreen() {
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
+    } catch {
+      setSaveError('Could not save — is the server running?');
     } finally {
       setBusy(false);
     }
@@ -95,6 +99,7 @@ export function ProfileScreen() {
             onChangeText={setSeats}
           />
           <View style={{ height: 12 }} />
+          {saveError ? <Text style={styles.saveError}>{saveError}</Text> : null}
           <Button
             title={saved ? 'Saved ✓' : 'Save changes'}
             loading={busy}
@@ -111,6 +116,7 @@ export function ProfileScreen() {
 const styles = StyleSheet.create({
   container: { padding: 24, paddingTop: 64, gap: 14, paddingBottom: 64 },
   back: { fontSize: 16, color: colors.subtle },
+  saveError: { color: '#7a1212', fontWeight: '600', marginBottom: 8 },
   label: { fontSize: 13, color: colors.subtle, fontWeight: '600', marginTop: 10 },
   input: {
     borderWidth: 1,

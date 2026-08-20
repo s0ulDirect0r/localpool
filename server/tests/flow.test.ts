@@ -153,6 +153,53 @@ describe('rider + driver carpool flow', () => {
     );
     const matches = await call(app, 'GET', '/rider/matches', undefined, rider.token);
     expect(matches.data.matches.length).toBe(0);
+
+    // Joining directly (bypassing the matches screen) must also be refused.
+    const trips = await call(app, 'GET', '/driver/active', undefined, driver.token);
+    const join = await call(
+      app,
+      'POST',
+      '/rider/join',
+      { trip_id: trips.data.active.trip.id },
+      rider.token,
+    );
+    expect(join.status).toBe(409);
+    expect(join.data.error).toBe('not_enough_seats');
+  });
+
+  it('driver history excludes cancelled riders from earnings and headcount', async () => {
+    const { app } = makeApp();
+    const driver = await createUser(app, 'dh@example.com');
+    const stay = await createUser(app, 'stay-h@example.com');
+    const bail = await createUser(app, 'bail-h@example.com');
+    const trip = await call(
+      app,
+      'POST',
+      '/driver/trip',
+      { pickup: PLACES.home, dropoff: PLACES.work, seats: 3 },
+      driver.token,
+    );
+    for (const t of [stay.token, bail.token]) {
+      await call(
+        app,
+        'POST',
+        '/rider/request',
+        { pickup: PLACES.home, dropoff: PLACES.work, seats: 1 },
+        t,
+      );
+      await call(app, 'POST', '/rider/join', { trip_id: trip.data.trip.id }, t);
+    }
+    await call(app, 'POST', '/rider/cancel', undefined, bail.token);
+    await call(app, 'POST', '/driver/start', undefined, driver.token);
+    await call(app, 'POST', '/driver/complete', undefined, driver.token);
+
+    const hist = await call(app, 'GET', '/rides/history', undefined, driver.token);
+    const item = hist.data.history[0];
+    expect(item.kind).toBe('driver');
+    expect(item.passenger_count).toBe(1);
+    // Earnings must equal only the staying rider's fare.
+    const stayHist = await call(app, 'GET', '/rides/history', undefined, stay.token);
+    expect(item.fare).toBeCloseTo(stayHist.data.history[0].fare, 2);
   });
 
   it('prevents creating a second active request', async () => {

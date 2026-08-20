@@ -1,7 +1,11 @@
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 
-const port = Number(process.env.PORT ?? 4000);
+const port = parseInt(process.env.PORT ?? '4000', 10);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error(`Invalid PORT: ${process.env.PORT}`);
+  process.exit(1);
+}
 const hostname = process.env.HOST ?? '0.0.0.0';
 const dbPath = process.env.DB_PATH ?? './localpool.db';
 const secret = process.env.JWT_SECRET;

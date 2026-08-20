@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, H1, H2, Muted, Pill, Row, colors } from '../components/ui';
 import { api } from '../api';
@@ -14,17 +14,21 @@ export function DriverRequestsScreen() {
   const { token, active, driverAccept, driverStart, driverCancel } = useApp();
   const [pending, setPending] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   const load = useCallback(async () => {
-    if (!token) return;
+    if (!token || inFlight.current) return;
+    inFlight.current = true;
     setLoading(true);
     try {
       const res = await api.driverRequests(token);
       setPending(res.requests);
     } catch {
-      setPending([]);
+      // Keep the last known list; polling will retry.
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }, [token]);
@@ -75,6 +79,11 @@ export function DriverRequestsScreen() {
       </Card>
 
       <H2>Nearby requests</H2>
+      {acceptError ? (
+        <Card style={{ borderColor: '#f5a3a3' }}>
+          <Text style={styles.errorText}>{acceptError}</Text>
+        </Card>
+      ) : null}
       {loading && pending.length === 0 ? (
         <Card>
           <ActivityIndicator />
@@ -108,9 +117,13 @@ export function DriverRequestsScreen() {
                 loading={acceptingId === p.request.id}
                 onPress={async () => {
                   setAcceptingId(p.request.id);
+                  setAcceptError(null);
                   try {
                     await driverAccept(p.request.id);
                     await load();
+                  } catch {
+                    setAcceptError('Could not accept — the request may have been taken or cancelled.');
+                    load();
                   } finally {
                     setAcceptingId(null);
                   }
@@ -136,6 +149,7 @@ const styles = StyleSheet.create({
   container: { padding: 24, paddingTop: 64, gap: 14, paddingBottom: 64 },
   name: { fontSize: 16, fontWeight: '700', color: colors.text },
   fare: { fontSize: 18, fontWeight: '700', color: colors.text },
+  errorText: { color: '#7a1212', fontWeight: '600' },
   acceptedRow: {
     flexDirection: 'row',
     alignItems: 'center',

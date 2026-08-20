@@ -10,6 +10,9 @@ SQLite backend.
 server/            Hono + better-sqlite3 + JWT backend, with Vitest integration tests
 ```
 
+> **Demoing this to someone?** See [DEMO.md](./DEMO.md) — one seed command
+> pre-loads demo accounts, an online driver, pending requests, and ratings.
+
 ## Run it
 
 In one terminal — start the backend:

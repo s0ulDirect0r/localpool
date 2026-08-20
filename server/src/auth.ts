@@ -36,12 +36,12 @@ export async function verifyPassword(pw: string, hash: string): Promise<boolean>
 }
 
 export function signToken(secret: string, userId: string): string {
-  return jwt.sign({ sub: userId }, secret, { expiresIn: '30d' });
+  return jwt.sign({ sub: userId }, secret, { expiresIn: '30d', algorithm: 'HS256' });
 }
 
 export function verifyToken(secret: string, token: string): string | null {
   try {
-    const decoded = jwt.verify(token, secret) as { sub?: string };
+    const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] }) as { sub?: string };
     return decoded.sub ?? null;
   } catch {
     return null;
