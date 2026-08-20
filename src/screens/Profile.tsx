@@ -1,0 +1,132 @@
+import React, { useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Button, Card, H1, H2, Muted, colors } from '../components/ui';
+import { useApp } from '../state/AppContext';
+
+export function ProfileScreen() {
+  const { user, updateProfile, signOut, navigate } = useApp();
+  const [vehicle, setVehicle] = useState(user?.vehicle ?? '');
+  const [seats, setSeats] = useState(String(user?.seats ?? 3));
+  const [bio, setBio] = useState(user?.bio ?? '');
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  if (!user) return null;
+
+  const onSave = async () => {
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await updateProfile({
+        vehicle: vehicle.trim() || null,
+        seats: Math.max(1, Math.min(7, Number(seats) || 3)),
+        bio: bio.trim() || null,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch {
+      setSaveError('Could not save — is the server running?');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: '#fff' }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <Pressable onPress={() => navigate('home')}>
+          <Text style={styles.back}>‹ Back</Text>
+        </Pressable>
+        <H1>Profile</H1>
+
+        <Card>
+          <H2>{user.name}</H2>
+          <Muted>{user.email}</Muted>
+          <Muted>{user.phone}</Muted>
+          <View style={{ height: 12 }} />
+          <Button
+            title="View public profile"
+            variant="secondary"
+            onPress={() =>
+              navigate('user_profile', { user_id: user.id, back_to: 'profile' })
+            }
+          />
+        </Card>
+
+        <Card>
+          <H2>About you</H2>
+          <Text style={styles.label}>Bio (shown to other carpool members)</Text>
+          <TextInput
+            style={[styles.input, { minHeight: 70, textAlignVertical: 'top' }]}
+            placeholder="e.g. Friendly, no smoking, podcasts welcome"
+            placeholderTextColor="#999"
+            value={bio}
+            onChangeText={setBio}
+            multiline
+          />
+        </Card>
+
+        <Card>
+          <H2>Vehicle (for driving)</H2>
+          <Text style={styles.label}>Vehicle description</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. Toyota Prius (Silver)"
+            placeholderTextColor="#999"
+            value={vehicle}
+            onChangeText={setVehicle}
+          />
+          <Text style={styles.label}>Seats you can offer</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="3"
+            placeholderTextColor="#999"
+            keyboardType="number-pad"
+            value={seats}
+            onChangeText={setSeats}
+          />
+          <View style={{ height: 12 }} />
+          {saveError ? <Text style={styles.saveError}>{saveError}</Text> : null}
+          <Button
+            title={saved ? 'Saved ✓' : 'Save changes'}
+            loading={busy}
+            onPress={onSave}
+          />
+        </Card>
+
+        <Button title="Sign out" variant="danger" onPress={signOut} />
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { padding: 24, paddingTop: 64, gap: 14, paddingBottom: 64 },
+  back: { fontSize: 16, color: colors.subtle },
+  saveError: { color: '#7a1212', fontWeight: '600', marginBottom: 8 },
+  label: { fontSize: 13, color: colors.subtle, fontWeight: '600', marginTop: 10 },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: colors.text,
+    backgroundColor: '#fff',
+    marginTop: 6,
+  },
+});

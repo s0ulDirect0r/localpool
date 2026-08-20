@@ -1,0 +1,141 @@
+export type Mode = 'rider' | 'driver';
+
+export type Location = {
+  label: string;
+  lat: number;
+  lng: number;
+};
+
+export type RideStatus =
+  | 'pending'
+  | 'matched'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled'
+  | 'active';
+
+export type Screen =
+  | 'welcome'
+  | 'signup'
+  | 'signin'
+  | 'home'
+  | 'rider_request'
+  | 'rider_matches'
+  | 'driver_setup'
+  | 'driver_requests'
+  | 'active_ride'
+  | 'history'
+  | 'profile'
+  | 'user_profile'
+  | 'rate_participants';
+
+export type ScreenParams = {
+  user_id?: string;
+  trip_id?: string;
+  back_to?: Screen;
+};
+
+// ----- Server-shaped types (snake_case to mirror SQLite rows) -----
+
+// Authenticated user shape — name is always present; email/phone are present
+// when this represents you, an active-trip co-participant, or someone you've
+// shared a completed trip with. Public surfaces (matches/requests/strangers'
+// profiles) omit them.
+export type ServerUser = {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  vehicle: string | null;
+  seats: number | null;
+  bio: string | null;
+};
+
+// /me always returns email/phone — type narrows accordingly.
+export type ServerSelfUser = ServerUser & { email: string; phone: string };
+
+export type ServerProfile = ServerUser & {
+  rating_avg: number | null;
+  rating_count: number;
+  rides_as_rider: number;
+  rides_as_driver: number;
+};
+
+export type ServerParticipants = {
+  trip: ServerTripRow;
+  driver: ServerProfile;
+  riders: { profile: ServerProfile; request: ServerRequestRow }[];
+};
+
+export type ServerRating = {
+  id: string;
+  trip_id: string;
+  rater_id: string;
+  ratee_id: string;
+  stars: number;
+  comment: string | null;
+  created_at: number;
+};
+
+export type ServerTripRow = {
+  id: string;
+  driver_id: string;
+  pickup_label: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_label: string;
+  dropoff_lat: number;
+  dropoff_lng: number;
+  seats_total: number;
+  seats_available: number;
+  status: 'active' | 'in_progress' | 'completed' | 'cancelled';
+  created_at: number;
+  driver?: ServerUser | null;
+};
+
+export type ServerRequestRow = {
+  id: string;
+  rider_id: string;
+  trip_id: string | null;
+  pickup_label: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_label: string;
+  dropoff_lat: number;
+  dropoff_lng: number;
+  seats: number;
+  fare: number;
+  status: 'pending' | 'matched' | 'in_progress' | 'completed' | 'cancelled';
+  created_at: number;
+  rider?: ServerUser | null;
+};
+
+export type ServerMatch = {
+  trip: ServerTripRow & { driver: ServerUser | null };
+  score: number;
+  fare: number;
+};
+
+export type ServerActiveRider = {
+  request: ServerRequestRow;
+  trip: (ServerTripRow & { driver: ServerUser | null }) | null;
+};
+
+export type ServerActiveDriver = {
+  trip: ServerTripRow;
+  requests: (ServerRequestRow & { rider: ServerUser | null })[];
+};
+
+export type ServerHistoryItem = {
+  kind: 'rider' | 'driver';
+  id: string;
+  trip_id: string | null;
+  pickup_label: string;
+  dropoff_label: string;
+  seats: number;
+  fare: number;
+  status: 'completed' | 'cancelled';
+  created_at: number;
+  trip?: ServerTripRow | null;
+  passenger_count?: number;
+};
