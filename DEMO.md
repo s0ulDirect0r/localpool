@@ -65,4 +65,3 @@ Open **two browser windows** side by side (or your phone + a browser).
 - Honest framing: matching is distance-scored on saved places; real
   geocoding/maps, payments, and push notifications are the obvious
   next milestones.
-```
