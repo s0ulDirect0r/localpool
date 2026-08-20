@@ -108,11 +108,12 @@ no port binding, no fixtures to clean up.
 
 ```bash
 cd server
-npm test           # 22 tests across auth + flow
+npm test           # 52 tests: auth, ride flow, ratings, PII/security
 ```
 
-Coverage: signup happy/sad paths, signin happy/sad paths, `/me` auth, profile update,
-seat clamping, full rider→matches→join, driver→accept→start→complete, status visible
-to rider while driver progresses, insufficient seats rejected, double-active-request
-rejected, cancellation refunds seats, driver cancel cascades to riders, history shape
-for both roles, capacity exhaustion.
+Coverage: auth happy/sad paths, `/me` auth and profile updates, the full
+rider→matches→join and driver→accept→start→complete flows, cross-role status
+visibility, seat accounting (races, refunds on cancel, capacity exhaustion,
+bounds), driver-cancel cascades, ratings rules (completed-trip-only, participants
+only, no self/duplicate rating), PII rules (contact info only between trip
+participants, never on discovery surfaces), and history shapes for both roles.

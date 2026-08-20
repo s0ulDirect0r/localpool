@@ -58,10 +58,11 @@ Open **two browser windows** side by side (or your phone + a browser).
 
 - Carpool-first: fares are ~45% below solo because seats are shared;
   the driver sees cumulative earnings as riders join.
-- Real backend: JWT auth with bcrypt passwords, SQLite, 51 passing
+- Real backend: JWT auth with bcrypt passwords, SQLite, 52 passing
   integration tests. Not a click-through mockup — she can sign up live.
 - Privacy: contact info is only exchanged between matched trip
   participants, never on discovery screens.
 - Honest framing: matching is distance-scored on saved places; real
   geocoding/maps, payments, and push notifications are the obvious
   next milestones.
+```
